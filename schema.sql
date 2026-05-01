@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS trainers (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     username VARCHAR(50) UNIQUE NOT NULL,
     trainer_name VARCHAR(100),
-    qualifications TEXT,
     tm_number VARCHAR(50),
     tm_expiration TIMESTAMP,
     nttc_number VARCHAR(50),
@@ -42,6 +41,18 @@ CREATE TABLE IF NOT EXISTS programs (
     created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create trainer_programs table for persistent trainer-program assignments
+CREATE TABLE IF NOT EXISTS trainer_programs (
+    id SERIAL PRIMARY KEY,
+    trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+    program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+    assigned_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    schedule_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(trainer_id, program_id)
 );
 
 -- Create notifications table
@@ -81,6 +92,8 @@ CREATE INDEX IF NOT EXISTS idx_trainers_username ON trainers(username);
 CREATE INDEX IF NOT EXISTS idx_trainers_user_id ON trainers(user_id);
 CREATE INDEX IF NOT EXISTS idx_programs_type ON programs(type);
 CREATE INDEX IF NOT EXISTS idx_programs_created_by ON programs(created_by);
+CREATE INDEX IF NOT EXISTS idx_trainer_programs_trainer_id ON trainer_programs(trainer_id);
+CREATE INDEX IF NOT EXISTS idx_trainer_programs_program_id ON trainer_programs(program_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_email ON otp_verifications(email);
 CREATE INDEX IF NOT EXISTS idx_verified_admin_emails_email ON verified_admin_emails(email);

@@ -86,5 +86,5 @@ async def broadcast_trainer_update(trainer_data):
 
     admin_ids = {admin["id"] for admin in admin_users}
     for sid, registered_user_id in connected_users.items():
-        if registered_user_id in admin_ids:
+        if int(registered_user_id) in admin_ids:
             await sio.emit("trainer_update", trainer_data, room=sid)

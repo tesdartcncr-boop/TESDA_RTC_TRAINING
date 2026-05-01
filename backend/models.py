@@ -31,7 +31,6 @@ class Trainer(Base):
     user_id = Column(Integer, nullable=False)  # Foreign key to users table
     username = Column(String(50), unique=True, index=True, nullable=False)
     trainer_name = Column(String(100), nullable=False)
-    qualifications = Column(Text)
     tm_number = Column(String(50))
     tm_expiration = Column(DateTime(timezone=True))
     nttc_number = Column(String(50))
@@ -54,6 +53,18 @@ class Program(Base):
     created_by = Column(Integer, nullable=False)  # Admin user ID
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class TrainerProgram(Base):
+    __tablename__ = "trainer_programs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    trainer_id = Column(Integer, nullable=False, index=True)
+    program_id = Column(Integer, nullable=False, index=True)
+    assigned_by = Column(Integer, nullable=False)
+    schedule_date = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
 
 class OTPVerification(Base):
     __tablename__ = "otp_verifications"

@@ -33,7 +33,6 @@ class UserResponse(BaseModel):
 class TrainerBase(BaseModel):
     username: str
     trainer_name: Optional[str] = None
-    qualifications: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
@@ -43,7 +42,6 @@ class TrainerCreate(BaseModel):
     username: str
     password: str
     trainer_name: Optional[str] = None
-    qualifications: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
@@ -51,7 +49,6 @@ class TrainerCreate(BaseModel):
 
 class TrainerUpdate(BaseModel):
     trainer_name: Optional[str] = None
-    qualifications: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
@@ -61,7 +58,6 @@ class TrainerResponse(BaseModel):
     id: int
     username: str
     trainer_name: str
-    qualifications: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
@@ -146,6 +142,24 @@ class NotificationResponse(BaseModel):
     title: str
     message: str
     is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# TrainerProgram schemas
+class TrainerProgramCreate(BaseModel):
+    trainer_id: int
+    program_id: int
+    assigned_by: int
+    schedule_date: Optional[datetime] = None
+
+class TrainerProgramResponse(BaseModel):
+    id: int
+    trainer_id: int
+    program_id: int
+    assigned_by: int
+    schedule_date: Optional[datetime] = None
     created_at: datetime
 
     class Config:

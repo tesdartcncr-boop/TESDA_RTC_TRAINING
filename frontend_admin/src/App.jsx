@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
+import { connectSocket, registerUser } from './utils/socket'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Trainers from './pages/Trainers'
@@ -9,7 +10,17 @@ import Schedules from './pages/Schedules'
 import Layout from './components/Layout'
 
 function App() {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, loading, user } = useAuth()
+
+  useEffect(() => {
+    connectSocket()
+  }, [])
+
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      registerUser(user.id)
+    }
+  }, [isAuthenticated, user])
 
   if (loading) {
     return (

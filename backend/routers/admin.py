@@ -140,7 +140,6 @@ async def export_trainers(current_user: CurrentUser):
                 "ID": trainer.get("id"),
                 "Username": trainer.get("username"),
                 "Name": trainer.get("trainer_name"),
-                "Qualifications": trainer.get("qualifications") or "",
                 "TM Number": trainer.get("tm_number") or "",
                 "TM Expiration": format_date(trainer.get("tm_expiration")),
                 "NTTC Number": trainer.get("nttc_number") or "",
