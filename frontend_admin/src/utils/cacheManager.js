@@ -3,7 +3,7 @@
  */
 
 export class BrowserCacheManager {
-  constructor(prefix = 'app_cache', expirationMinutes = 30) {
+  constructor(prefix = 'app_cache_v2', expirationMinutes = 30) {
     this.prefix = prefix
     this.expirationMs = expirationMinutes * 60 * 1000
   }

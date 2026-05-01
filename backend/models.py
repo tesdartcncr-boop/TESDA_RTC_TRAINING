@@ -30,6 +30,7 @@ class Trainer(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False)  # Foreign key to users table
     username = Column(String(50), unique=True, index=True, nullable=False)
+    qualifications = Column(Text)
     trainer_name = Column(String(100), nullable=False)
     tm_number = Column(String(50))
     tm_expiration = Column(DateTime(timezone=True))

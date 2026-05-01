@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS trainers (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     username VARCHAR(50) UNIQUE NOT NULL,
+    qualifications TEXT,
     trainer_name VARCHAR(100),
     tm_number VARCHAR(50),
     tm_expiration TIMESTAMP,
@@ -53,6 +54,21 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(trainer_id, program_id)
+);
+
+-- Create schedules table for tracking daily schedule entries
+CREATE TABLE IF NOT EXISTS schedules (
+    id SERIAL PRIMARY KEY,
+    trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+    program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+    day_number INTEGER NOT NULL,
+    hours_per_day INTEGER NOT NULL CHECK (hours_per_day IN (4, 8)),
+    status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave')),
+    schedule_date DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(trainer_id, program_id, day_number)
 );
 
 -- Create notifications table
@@ -94,6 +110,9 @@ CREATE INDEX IF NOT EXISTS idx_programs_type ON programs(type);
 CREATE INDEX IF NOT EXISTS idx_programs_created_by ON programs(created_by);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_trainer_id ON trainer_programs(trainer_id);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_program_id ON trainer_programs(program_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_trainer_id ON schedules(trainer_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_program_id ON schedules(program_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_trainer_program ON schedules(trainer_id, program_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_email ON otp_verifications(email);
 CREATE INDEX IF NOT EXISTS idx_verified_admin_emails_email ON verified_admin_emails(email);

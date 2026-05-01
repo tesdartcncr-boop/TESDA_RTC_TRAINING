@@ -1,275 +1,421 @@
-import React, { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { CalendarDays, Plus, UserCheck, AlertCircle } from 'lucide-react'
+import React, { useEffect, useCallback, useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 
-const Schedules = () => {
-  const location = useLocation()
-  const navigate = useNavigate()
+const STATUS_COLORS = {
+  complete: { bg: 'bg-green-500', label: 'Complete', shortLabel: '✓' },
+  absent: { bg: 'bg-red-500', label: 'Absent', shortLabel: '✗' },
+  suspended: { bg: 'bg-yellow-500', label: 'Suspended', shortLabel: '⊗' },
+  leave: { bg: 'bg-blue-500', label: 'Leave', shortLabel: '◐' },
+}
+
+const STATUS_DOT_COLORS = {
+  complete: 'bg-green-500',
+  absent: 'bg-red-500',
+  suspended: 'bg-yellow-500',
+  leave: 'bg-blue-500',
+}
+
+export default function Schedules() {
   const [trainers, setTrainers] = useState([])
-  const [programs, setPrograms] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showAssignModal, setShowAssignModal] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState('')
-  const [assignments, setAssignments] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [selectedTrainer, setSelectedTrainer] = useState(null)
+  const [trainerPrograms, setTrainerPrograms] = useState([])
+  const [selectedProgram, setSelectedProgram] = useState(null)
+  const [hoursPerDay, setHoursPerDay] = useState(8)
+  const [scheduleData, setScheduleData] = useState({})
+  const [isSaving, setIsSaving] = useState(false)
+  const [selectedCell, setSelectedCell] = useState(null)
+  const [showStatusMenu, setShowStatusMenu] = useState(false)
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm()
-
-  const fetchData = async () => {
+  const fetchTrainers = useCallback(async () => {
     try {
-      setError('')
+      setLoading(true)
       const token = localStorage.getItem('admin_token')
-
-      const [trainerRes, programRes] = await Promise.all([
-        fetch('http://localhost:5000/api/trainers/?skip=0&limit=100', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch('http://localhost:5000/api/programs/?skip=0&limit=100', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-      ])
-
-      if (!trainerRes.ok || !programRes.ok) {
-        throw new Error('Failed to load trainers or programs')
+      const res = await fetch('http://localhost:5000/api/trainers/?skip=0&limit=100', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTrainers(data.data || [])
       }
-
-      const trainerData = await trainerRes.json()
-      const programData = await programRes.json()
-
-      setTrainers(trainerData.data || [])
-      setPrograms(programData.data || [])
-    } catch (fetchError) {
-      setError(fetchError.message)
+    } catch (e) {
+      setError(e.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    fetchData()
   }, [])
 
   useEffect(() => {
-    if (location.state?.openAssignModal) {
-      setShowAssignModal(true)
-      navigate(location.pathname, { replace: true, state: {} })
-    }
-  }, [location, navigate])
+    fetchTrainers()
+  }, [fetchTrainers])
 
-  const onAssignProgram = async (data) => {
-    setIsSubmitting(true)
-
+  const handleTrainerClick = async (trainer) => {
     try {
-      setError('')
-      const trainer = trainers.find((item) => String(item.id) === String(data.trainer_id))
-      const program = programs.find((item) => String(item.id) === String(data.program_id))
-
-      if (!trainer || !program) {
-        throw new Error('Please select a valid trainer and program')
+      const token = localStorage.getItem('admin_token')
+      const res = await fetch(
+        `http://localhost:5000/api/schedules/trainer/${trainer.id}/programs`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        const programs = await res.json()
+        setTrainerPrograms(programs)
+        setSelectedTrainer(trainer)
+        setSelectedProgram(null)
+        setScheduleData({})
       }
-
-      const title = 'New Program Assignment'
-      const scheduleLabel = data.schedule_date ? ` on ${data.schedule_date}` : ''
-      const message = `${program.name} has been assigned to ${trainer.trainer_name || trainer.username}${scheduleLabel}.`
-
-      const response = await fetch('http://localhost:5000/api/admin/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('admin_token')}`,
-        },
-        body: JSON.stringify({
-          user_id: trainer.user_id,
-          title,
-          message,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to assign program to trainer')
-      }
-
-      setAssignments((prev) => [
-        {
-          id: `${trainer.id}-${program.id}-${Date.now()}`,
-          trainerName: trainer.trainer_name || trainer.username,
-          programName: program.name,
-          scheduleDate: data.schedule_date || 'Not set',
-        },
-        ...prev,
-      ])
-
-      setShowAssignModal(false)
-      reset()
-    } catch (submitError) {
-      setError(submitError.message)
-    } finally {
-      setIsSubmitting(false)
+    } catch (e) {
+      console.error('Failed to fetch trainer programs', e)
+      setError('Failed to fetch programs')
     }
   }
 
-  if (loading) {
+  const handleProgramSelect = async (program) => {
+    try {
+      const token = localStorage.getItem('admin_token')
+      const res = await fetch(
+        `http://localhost:5000/api/schedules/trainer/${selectedTrainer.id}/program/${program.program_id}/schedule`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const scheduleMap = {}
+        data.forEach((entry) => {
+          scheduleMap[entry.day_number] = entry
+        })
+        setScheduleData(scheduleMap)
+      }
+    } catch (e) {
+      console.error('Failed to fetch schedule', e)
+    }
+    setSelectedProgram(program)
+    setSelectedCell(null)
+    setHoursPerDay(8)
+  }
+
+  const handleCellClick = (dayNumber) => {
+    setSelectedCell(dayNumber)
+    setShowStatusMenu(true)
+  }
+
+  const handleStatusChange = async (status) => {
+    if (!selectedTrainer || !selectedProgram || !selectedCell || isSaving) return
+    try {
+      setIsSaving(true)
+      const token = localStorage.getItem('admin_token')
+      const currentStatus = scheduleData[selectedCell]?.status
+      const newStatus = currentStatus === status ? null : status
+
+      const res = await fetch(
+        `http://localhost:5000/api/schedules/trainer/${selectedTrainer.id}/program/${selectedProgram.program_id}/day/${selectedCell}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            hours_per_day: hoursPerDay,
+            status: newStatus,
+          }),
+        }
+      )
+      if (res.ok) {
+        const updated = await res.json()
+        setScheduleData((prev) => ({
+          ...prev,
+          [selectedCell]: updated.data,
+        }))
+      }
+    } catch (e) {
+      console.error('Failed to update schedule', e)
+      setError('Failed to update status')
+    } finally {
+      setIsSaving(false)
+      setShowStatusMenu(false)
+    }
+  }
+
+  const calculateDaysNeeded = () => {
+    if (!selectedProgram) return 0
+    const totalDays = selectedProgram.program_days || 1
+    return hoursPerDay === 8 ? totalDays : Math.ceil(totalDays * 8 / hoursPerDay)
+  }
+
+  const calculateTotalHours = () => {
+    if (!selectedProgram) return 0
+    return (selectedProgram.program_days || 1) * 8
+  }
+
+  // Trainer selection view
+  if (!selectedTrainer) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">Schedules</h1>
+            <p className="text-slate-600 text-lg">Select a trainer to manage their program schedules</p>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded">
+              <div className="flex items-start">
+                <AlertCircle className="text-red-500 mr-3 mt-0.5 flex-shrink-0" size={20} />
+                <p className="text-red-700">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="text-slate-600 mt-4">Loading trainers...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {trainers.map((trainer) => (
+                <button
+                  key={trainer.id}
+                  onClick={() => handleTrainerClick(trainer)}
+                  className="group relative overflow-hidden rounded-xl bg-white p-6 shadow-md hover:shadow-xl transition-all duration-300 border-2 border-slate-200 hover:border-blue-500"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                  <div className="relative z-10">
+                    <h3 className="text-lg font-bold text-slate-900 mb-1">{trainer.trainer_name || trainer.username}</h3>
+                    <p className="text-sm text-slate-500">Click to manage schedules</p>
+                  </div>
+                  <div className="absolute right-4 top-4 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xl">
+                    →
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     )
   }
 
-  return (
-    <div className="space-y-6">
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-red-500 mr-3" />
-            <p className="text-red-800">{error}</p>
-            <button
-              onClick={() => setError('')}
-              className="ml-auto text-red-500 hover:text-red-700"
-            >
-              x
-            </button>
-          </div>
-        </div>
-      )}
+  // Program selection view
+  if (!selectedProgram) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+        <div className="max-w-4xl mx-auto">
+          <button
+            onClick={() => {
+              setSelectedTrainer(null)
+              setTrainerPrograms([])
+            }}
+            className="mb-6 inline-flex items-center px-4 py-2 rounded-lg bg-white text-slate-700 border border-slate-200 hover:border-slate-300 transition-colors font-semibold"
+          >
+            ← Back to Trainers
+          </button>
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Schedules</h1>
-          <p className="mt-2 text-base text-gray-600 font-medium">
-            Assign programs to trainers and track recent assignments.
-          </p>
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">
+              {selectedTrainer.trainer_name || selectedTrainer.username}
+            </h1>
+            <p className="text-slate-600 text-lg">Select a program to manage the schedule</p>
+          </div>
+
+          {trainerPrograms.length === 0 ? (
+            <div className="bg-white rounded-lg p-8 text-center">
+              <p className="text-slate-600 text-lg">No programs assigned to this trainer yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {trainerPrograms.map((program) => (
+                <button
+                  key={program.program_id}
+                  onClick={() => handleProgramSelect(program)}
+                  className="group relative overflow-hidden rounded-xl bg-white p-8 shadow-lg hover:shadow-2xl transition-all duration-300 border-2 border-slate-200 hover:border-blue-500 text-left"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                  <div className="relative z-10">
+                    <h3 className="text-2xl font-bold text-slate-900 mb-3">{program.program_name}</h3>
+                    <div className="space-y-2 text-slate-600">
+                      <p className="flex justify-between">
+                        <span className="font-medium">Duration:</span>
+                        <span className="font-semibold text-slate-900">{program.program_days} days</span>
+                      </p>
+                      <p className="flex justify-between">
+                        <span className="font-medium">Schedule:</span>
+                        <span className="font-semibold text-slate-900">{program.program_schedule}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="absolute right-6 top-6 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-2xl">
+                    →
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <button
-          onClick={() => setShowAssignModal(true)}
-          className="flex items-center px-4 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 shadow-md hover:shadow-lg transition-all duration-200"
-        >
-          <Plus className="h-5 w-5 mr-2" />
-          Assign Program
-        </button>
       </div>
+    )
+  }
 
-      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Recent Assignments</h2>
-        {assignments.length === 0 ? (
-          <div className="text-center py-8 text-gray-600">
-            <CalendarDays className="mx-auto h-12 w-12 text-gray-400" />
-            <p className="mt-3 font-medium">No assignments yet</p>
-            <p className="text-sm">Click Assign Program to create one.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {assignments.map((assignment) => (
-              <div
-                key={assignment.id}
-                className="flex items-center justify-between border border-gray-200 rounded-lg p-4"
-              >
-                <div>
-                  <p className="text-sm font-bold text-gray-900">{assignment.programName}</p>
-                  <p className="text-sm text-gray-600">Assigned to {assignment.trainerName}</p>
+  // Schedule detail view
+  const totalDays = calculateDaysNeeded()
+  const totalHours = calculateTotalHours()
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Navigation */}
+        <button
+          onClick={() => {
+            setSelectedProgram(null)
+            setSelectedCell(null)
+            setShowStatusMenu(false)
+          }}
+          className="mb-6 inline-flex items-center px-4 py-2 rounded-lg bg-white text-slate-700 border border-slate-200 hover:border-slate-300 transition-colors font-semibold"
+        >
+          ← Back to Programs
+        </button>
+
+        {/* Header with Info */}
+        <div className="bg-white rounded-xl shadow-lg p-8 mb-8 border border-slate-200">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 mb-3">
+                Name: <span className="text-blue-600">{selectedTrainer.trainer_name || selectedTrainer.username}</span>
+              </h1>
+              <p className="text-lg text-slate-600 mb-3">
+                Program: <span className="font-bold text-blue-600 text-xl">{selectedProgram.program_name}</span>
+              </p>
+              <p className="text-lg text-slate-600">
+                Total hours: <span className="font-bold text-slate-900">{totalHours} hours</span>
+              </p>
+            </div>
+            <div className="flex flex-col justify-end">
+              <div className="bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl p-6 border-2 border-blue-200">
+                <p className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Time per Day</p>
+                <div className="flex gap-3 mb-4">
+                  {[4, 8].map((hours) => (
+                    <button
+                      key={hours}
+                      onClick={() => setHoursPerDay(hours)}
+                      className={`px-6 py-3 rounded-lg font-bold text-lg transition-all ${
+                        hoursPerDay === hours
+                          ? 'bg-blue-600 text-white shadow-lg scale-105'
+                          : 'bg-white text-slate-700 border-2 border-slate-300 hover:border-blue-400'
+                      }`}
+                    >
+                      {hours}h
+                    </button>
+                  ))}
                 </div>
-                <span className="text-sm text-gray-500">{assignment.scheduleDate}</span>
+                <p className="text-sm text-slate-600 font-semibold">
+                  Days needed: <span className="text-slate-900 text-base">{totalDays} days</span>
+                </p>
               </div>
-            ))}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded">
+            <div className="flex items-start">
+              <AlertCircle className="text-red-500 mr-3 mt-0.5 flex-shrink-0" size={20} />
+              <p className="text-red-700">{error}</p>
+            </div>
           </div>
         )}
-      </div>
 
-      {showAssignModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-md w-full p-8 shadow-2xl">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">Assign Program to Trainer</h3>
-            <form onSubmit={handleSubmit(onAssignProgram)} className="space-y-4">
-              <div>
-                <label htmlFor="assign-trainer" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Trainer *
-                </label>
-                <select
-                  id="assign-trainer"
-                  {...register('trainer_id', { required: 'Trainer is required' })}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">Select trainer</option>
-                  {trainers.map((trainer) => (
-                    <option key={trainer.id} value={trainer.id}>
-                      {trainer.trainer_name || trainer.username}
-                    </option>
-                  ))}
-                </select>
-                {errors.trainer_id && (
-                  <p className="mt-2 text-sm font-semibold text-red-600">{errors.trainer_id.message}</p>
-                )}
-              </div>
+        {/* Schedule Grid */}
+        <div className="bg-white rounded-xl shadow-lg p-8 mb-8 border border-slate-200">
+          <h2 className="text-2xl font-bold text-slate-900 mb-6">Schedule Grid - Click cells to set attendance status</h2>
+          <div className="mb-6">
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(5.75rem, 1fr))' }}
+            >
+              {Array.from({ length: totalDays }, (_, i) => i + 1).map((day) => {
+                const entry = scheduleData[day]
+                const status = entry?.status
+                const dotColor = status ? STATUS_DOT_COLORS[status] : null
+                const isSelected = selectedCell === day
+                let cellClassName = 'bg-white border-slate-300 text-slate-900 hover:border-slate-400 hover:bg-slate-50'
 
-              <div>
-                <label htmlFor="assign-program" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Program *
-                </label>
-                <select
-                  id="assign-program"
-                  {...register('program_id', { required: 'Program is required' })}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">Select program</option>
-                  {programs.map((program) => (
-                    <option key={program.id} value={program.id}>
-                      {program.name}
-                    </option>
-                  ))}
-                </select>
-                {errors.program_id && (
-                  <p className="mt-2 text-sm font-semibold text-red-600">{errors.program_id.message}</p>
-                )}
-              </div>
+                if (isSelected) {
+                  cellClassName = 'bg-blue-100 border-blue-400 text-slate-900 shadow-sm'
+                }
 
-              <div>
-                <label htmlFor="assign-date" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Schedule Date
-                </label>
-                <input
-                  id="assign-date"
-                  type="date"
-                  {...register('schedule_date')}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
-                />
-              </div>
+                return (
+                  <button
+                    key={day}
+                    onClick={() => handleCellClick(day)}
+                    className={`relative flex aspect-square min-h-24 w-full flex-col items-center justify-center rounded-xl border-2 px-2 py-3 font-bold text-sm transition-all ${cellClassName}`}
+                    title={`Day ${day} - ${status ? STATUS_COLORS[status].label : 'Click to set status'}`}
+                  >
+                    <span className="text-[11px] uppercase tracking-[0.2em] opacity-75">Day</span>
+                    <span className="mt-1 text-lg leading-none">{day}</span>
+                    <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-75">
+                      {status ? STATUS_COLORS[status].label : 'Open'}
+                    </span>
+                    {dotColor && (
+                      <span
+                        className={`absolute right-2 top-2 h-5 w-5 rounded-full border-2 border-white shadow-lg ring-2 ring-white ${dotColor}`}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
-              <div className="flex justify-end space-x-3 pt-4">
+          {/* Status Menu */}
+          {showStatusMenu && selectedCell && (
+            <div className="bg-slate-50 rounded-lg p-6 border-2 border-blue-400 mb-6">
+              <p className="text-sm font-bold text-slate-700 mb-4">Day {selectedCell} - Select Status:</p>
+              <div className="flex flex-wrap gap-3">
+                {Object.entries(STATUS_COLORS).map(([status, config]) => (
+                  <button
+                    key={status}
+                    onClick={() => handleStatusChange(status)}
+                    disabled={isSaving}
+                    className={`px-5 py-3 rounded-lg text-white font-bold transition-all ${config.bg} hover:shadow-lg disabled:opacity-50 flex items-center gap-2`}
+                  >
+                    <span className="text-lg">{config.shortLabel}</span>
+                    {config.label}
+                  </button>
+                ))}
                 <button
-                  type="button"
                   onClick={() => {
-                    setShowAssignModal(false)
-                    reset()
+                    setShowStatusMenu(false)
+                    setSelectedCell(null)
                   }}
-                  className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="px-5 py-3 rounded-lg bg-slate-400 text-white font-bold hover:bg-slate-500 transition-colors ml-auto"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 inline-flex items-center"
-                >
-                  <UserCheck className="h-4 w-4 mr-2" />
-                  {isSubmitting ? 'Assigning...' : 'Assign'}
-                </button>
               </div>
-            </form>
+              <p className="text-xs text-slate-500 mt-3 italic">Click same status again to clear it</p>
+            </div>
+          )}
+        </div>
+
+        {/* Legend */}
+        <div className="bg-white rounded-xl shadow-lg p-8 border border-slate-200">
+          <h3 className="text-xl font-bold text-slate-900 mb-6">Status Legend</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {Object.entries(STATUS_COLORS).map(([status, config]) => (
+              <div key={status} className="flex items-center gap-4">
+                <div className={`w-8 h-8 rounded-full ${config.bg} flex-shrink-0 flex items-center justify-center text-white font-bold text-sm`}>
+                  {config.shortLabel}
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900">{config.label}</p>
+                  <p className="text-xs text-slate-500 capitalize">{status}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
-
-export default Schedules

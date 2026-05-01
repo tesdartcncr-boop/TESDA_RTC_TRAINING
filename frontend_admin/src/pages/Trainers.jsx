@@ -18,7 +18,9 @@ const Trainers = () => {
   const [showQuickAssignModal, setShowQuickAssignModal] = useState(false)
   const [selectedTrainer, setSelectedTrainer] = useState(null)
   const [quickAssignTarget, setQuickAssignTarget] = useState(null)
-  const [quickAssignProgramId, setQuickAssignProgramId] = useState('')
+  const [quickAssignSearchTerm, setQuickAssignSearchTerm] = useState('')
+  const [quickAssignAssignedPrograms, setQuickAssignAssignedPrograms] = useState([])
+  const [quickAssignSelectedPrograms, setQuickAssignSelectedPrograms] = useState([])
   const [selectedEditPrograms, setSelectedEditPrograms] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -121,7 +123,7 @@ const Trainers = () => {
       const currentAssignments = await fetchTrainerPrograms(selectedTrainer.id)
       const currentIds = currentAssignments.map(a => String(a.program.id))
       const toAdd = selectedEditPrograms.filter(id => !currentIds.includes(id))
-      for (const pid of toAdd) { await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trainer_id: selectedTrainer.id, program_id: parseInt(pid, 10), assigned_by: 1 }) }) }
+      for (const pid of toAdd) { await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trainer_id: selectedTrainer.id, program_id: Number.parseInt(pid, 10), assigned_by: 1 }) }) }
       const toRemove = currentIds.filter(id => !selectedEditPrograms.includes(id))
       for (const pid of toRemove) { await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs/${pid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }) }
       cacheManager.clearPattern('trainers:.*'); setSkip(0); await fetchTrainers(0, false); setShowEditModal(false); setSelectedTrainer(null); setSelectedEditPrograms([]); reset(); setSuccessMessage('Trainer updated!')
@@ -138,12 +140,20 @@ const Trainers = () => {
   }
 
   const onQuickAssign = async () => {
-    if (!quickAssignProgramId || !quickAssignTarget) return
+    if (quickAssignSelectedPrograms.length === 0 || !quickAssignTarget) return
     setIsLoading(true)
     try {
-      const res = await fetch(`http://localhost:5000/api/trainers/${quickAssignTarget.id}/programs`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }, body: JSON.stringify({ trainer_id: quickAssignTarget.id, program_id: parseInt(quickAssignProgramId, 10), assigned_by: 1 }) })
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed') }
-      setShowQuickAssignModal(false); setQuickAssignTarget(null); setQuickAssignProgramId(''); setSuccessMessage('Program assigned!'); cacheManager.clearPattern('trainers:.*'); await fetchTrainers(0, false)
+      const token = localStorage.getItem('admin_token')
+      await Promise.all(quickAssignSelectedPrograms.map((programId) => fetch(`http://localhost:5000/api/trainers/${quickAssignTarget.id}/programs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ trainer_id: quickAssignTarget.id, program_id: Number.parseInt(programId, 10), assigned_by: 1 })
+      })))
+      setSelectedEditPrograms((current) => Array.from(new Set([...current, ...quickAssignSelectedPrograms])))
+      closeQuickAssignModal()
+      setSuccessMessage('Programs assigned!')
+      cacheManager.clearPattern('trainers:.*')
+      await fetchTrainers(0, false)
     } catch (e) { setError(e.message) } finally { setIsLoading(false) }
   }
 
@@ -159,9 +169,42 @@ const Trainers = () => {
     setShowEditModal(true)
   }
 
-  const openQuickAssignModal = (trainer) => { setQuickAssignTarget(trainer); setQuickAssignProgramId(''); setShowQuickAssignModal(true) }
+  const openQuickAssignModal = async (trainer) => {
+    setQuickAssignTarget(trainer)
+    setQuickAssignSearchTerm('')
+    const assignments = await fetchTrainerPrograms(trainer.id)
+    setQuickAssignAssignedPrograms(assignments.map((assignment) => String(assignment.program.id)))
+    setQuickAssignSelectedPrograms([])
+    setShowQuickAssignModal(true)
+  }
 
-  const formatDate = (dateString) => { if (!dateString) return 'Not set'; return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) }
+  const closeQuickAssignModal = () => {
+    setShowQuickAssignModal(false)
+    setQuickAssignTarget(null)
+    setQuickAssignSearchTerm('')
+    setQuickAssignAssignedPrograms([])
+    setQuickAssignSelectedPrograms([])
+  }
+
+  const assignedProgramMap = programs.reduce((map, program) => {
+    map[String(program.id)] = program
+    return map
+  }, {})
+
+  const quickAssignAvailablePrograms = programs.filter((program) => !quickAssignAssignedPrograms.includes(String(program.id))).filter((program) => {
+    const query = quickAssignSearchTerm.trim().toLowerCase()
+    if (!query) return true
+    return program.name.toLowerCase().includes(query)
+  })
+
+  const toggleQuickAssignProgram = (programId) => {
+    setQuickAssignSelectedPrograms((current) => current.includes(programId) ? current.filter((id) => id !== programId) : [...current, programId])
+  }
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set'
+    return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  }
 
   const exportTrainers = async () => {
     try {
@@ -213,7 +256,7 @@ const Trainers = () => {
                     <div className="text-sm">
                       <div className="flex items-center justify-between mb-1">
                         <p className="font-semibold text-gray-700 flex items-center"><BookOpen className="h-4 w-4 mr-1 text-blue-600" />Assigned Programs:</p>
-                        <button onClick={() => openQuickAssignModal(trainer)} className="inline-flex items-center px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"><Plus className="h-3 w-3 mr-1" />Assign</button>
+                        <button onClick={() => openQuickAssignModal(trainer)} className="inline-flex items-center px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"><Plus className="h-3 w-3 mr-1" />Add more</button>
                       </div>
                       <TrainerProgramsList trainerId={trainer.id} fetchTrainerPrograms={fetchTrainerPrograms} />
                     </div>
@@ -277,20 +320,28 @@ const Trainers = () => {
               <div><label className="block text-sm font-semibold text-gray-700 mb-2">Trainer Name</label><input {...register('trainer_name')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter trainer name" /></div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Assigned Programs</label>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="block text-sm font-semibold text-gray-700">Assigned Programs</span>
+                  <button type="button" onClick={() => openQuickAssignModal(selectedTrainer)} className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"><Plus className="h-3 w-3 mr-1" />Add more</button>
+                </div>
                 <div className="border-2 border-gray-200 rounded-lg p-4 max-h-40 overflow-y-auto">
-                  {programs.length === 0 ? <p className="text-sm text-gray-500">No programs available</p> : (
-                    <div className="space-y-2">
-                      {programs.map((program) => (
-                        <label key={program.id} className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
-                          <input type="checkbox" value={program.id} checked={selectedEditPrograms.includes(String(program.id))} onChange={(e) => { const pid = String(program.id); if (e.target.checked) { setSelectedEditPrograms(p => [...p, pid]) } else { setSelectedEditPrograms(p => p.filter(id => id !== pid)) } }} className="h-4 w-4 text-blue-600" />
-                          <span className="text-sm text-gray-700 font-medium">{program.name}</span>
-                        </label>
-                      ))}
+                  {selectedEditPrograms.length === 0 ? <p className="text-sm text-gray-500">No programs assigned</p> : (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedEditPrograms.map((programId) => {
+                        const program = assignedProgramMap[programId]
+                        return (
+                          <span key={programId} className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                            <span>{program?.name || 'Unknown'}</span>
+                            <button type="button" onClick={() => setSelectedEditPrograms((current) => current.filter((id) => id !== programId))} className="rounded-full p-0.5 hover:bg-blue-200" aria-label={`Remove ${program?.name || 'program'}`}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
-                {selectedEditPrograms.length > 0 && <p className="mt-2 text-sm text-blue-600 font-semibold">{selectedEditPrograms.length} program{selectedEditPrograms.length !== 1 ? 's' : ''} selected</p>}
+                {selectedEditPrograms.length > 0 && <p className="mt-2 text-sm text-blue-600 font-semibold">{selectedEditPrograms.length} program{selectedEditPrograms.length === 1 ? '' : 's'} selected</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -313,19 +364,32 @@ const Trainers = () => {
       {/* Quick Assign Modal */}
       {showQuickAssignModal && quickAssignTarget && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-md w-full p-8 shadow-2xl">
-            <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-gray-900">Assign Program to {quickAssignTarget.trainer_name || quickAssignTarget.username}</h3><button onClick={() => { setShowQuickAssignModal(false); setQuickAssignTarget(null) }} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button></div>
+          <div className="relative bg-white rounded-xl max-w-lg w-full p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">Add more programs</h3>
+                <p className="mt-1 text-sm text-gray-500">{quickAssignTarget.trainer_name || quickAssignTarget.username}</p>
+              </div>
+              <button onClick={closeQuickAssignModal} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+            </div>
             <div className="space-y-4">
-              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Program *</label>
-                <select value={quickAssignProgramId} onChange={(e) => setQuickAssignProgramId(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500">
-                  <option value="">Select program</option>
-                  {programs.map((program) => (<option key={program.id} value={program.id}>{program.name}</option>))}
-                </select>
+              <div className="relative"><Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" /><input type="text" value={quickAssignSearchTerm} onChange={(e) => setQuickAssignSearchTerm(e.target.value)} placeholder="Search unassigned programs..." className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+              <div className="border-2 border-gray-200 rounded-lg p-4 max-h-72 overflow-y-auto">
+                {quickAssignAvailablePrograms.length === 0 ? <p className="text-sm text-gray-500">No unassigned programs found</p> : (
+                  <div className="space-y-2">
+                    {quickAssignAvailablePrograms.map((program) => {
+                      const checked = quickAssignSelectedPrograms.includes(String(program.id))
+                      return (
+                        <label key={program.id} className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                          <input type="checkbox" checked={checked} onChange={() => toggleQuickAssignProgram(String(program.id))} className="h-4 w-4 text-blue-600" />
+                          <span className="text-sm text-gray-700 font-medium">{program.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button onClick={() => { setShowQuickAssignModal(false); setQuickAssignTarget(null) }} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                <button onClick={onQuickAssign} disabled={isLoading || !quickAssignProgramId} className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50">{isLoading ? 'Assigning...' : 'Assign'}</button>
-              </div>
+              <div className="flex justify-end space-x-3 pt-4"><button onClick={closeQuickAssignModal} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button><button onClick={onQuickAssign} disabled={isLoading || quickAssignSelectedPrograms.length === 0} className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50">{isLoading ? 'Assigning...' : 'Add selected'}</button></div>
             </div>
           </div>
         </div>

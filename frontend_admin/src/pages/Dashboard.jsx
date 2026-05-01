@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { useAuth } from '../contexts/AuthContext'
+import { cacheManager } from '../utils/cacheManager'
+import ProgramMultiSelect from '../components/ProgramMultiSelect'
 import {
   Users,
   BookOpen,
   CalendarPlus,
   Clock,
   UserCheck,
-  Award,
   X,
   CheckCircle
 } from 'lucide-react'
@@ -26,7 +27,6 @@ const Dashboard = () => {
   const [assignments, setAssignments] = useState([])
 
   // UI states
-  const [loading, setLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [successMessage, setSuccessMessage] = useState(null)
@@ -112,11 +112,12 @@ const Dashboard = () => {
 
       if (!response.ok) throw new Error('Failed to create program')
 
+      cacheManager.clearPattern('programs:.*')
       setShowCreateProgramModal(false)
       programForm.reset()
       setFormHours(0)
       setSuccessMessage('Program created successfully!')
-      fetchTrainersAndPrograms() // Refresh programs list
+      await fetchTrainersAndPrograms() // Refresh trainers and programs from the database
     } catch (err) {
       console.error('Failed to create program:', err)
       setError(err.message)
@@ -155,34 +156,32 @@ const Dashboard = () => {
       }
 
       const newTrainer = await response.json()
+      cacheManager.clearPattern('trainers:.*')
+
+      const uniqueSelectedPrograms = Array.from(new Set(selectedPrograms))
 
       // Assign selected programs to the new trainer via the trainer_programs endpoint
-      if (selectedPrograms.length > 0 && newTrainer.id) {
+      if (uniqueSelectedPrograms.length > 0 && newTrainer.id) {
         const token = localStorage.getItem('admin_token')
-        for (const programId of selectedPrograms) {
-          const program = programs.find(p => String(p.id) === String(programId))
-          if (program) {
-            await fetch(`http://localhost:5000/api/trainers/${newTrainer.id}/programs`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                trainer_id: newTrainer.id,
-                program_id: parseInt(programId, 10),
-                assigned_by: user?.id || 1
-              })
-            })
-          }
-        }
+        await Promise.all(uniqueSelectedPrograms.map((programId) => fetch(`http://localhost:5000/api/trainers/${newTrainer.id}/programs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            trainer_id: newTrainer.id,
+            program_id: Number.parseInt(programId, 10),
+            assigned_by: user?.id || 1
+          })
+        })))
       }
 
       setShowCreateTrainerModal(false)
       trainerForm.reset()
       setSelectedPrograms([])
       setSuccessMessage('Trainer created successfully!')
-      fetchTrainersAndPrograms() // Refresh trainers list
+      await fetchTrainersAndPrograms() // Refresh trainers list from the database
     } catch (err) {
       console.error('Failed to create trainer:', err)
       setError(err.message)
@@ -290,6 +289,8 @@ const Dashboard = () => {
         <button
           onClick={() => {
             setError(null)
+            setSelectedPrograms([])
+            trainerForm.reset()
             setShowCreateTrainerModal(true)
           }}
           className="card p-6 text-left hover:shadow-lg transition-shadow bg-white rounded-xl border border-gray-200"
@@ -472,7 +473,11 @@ const Dashboard = () => {
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Create New Trainer</h3>
               <button
-                onClick={() => setShowCreateTrainerModal(false)}
+                onClick={() => {
+                  setShowCreateTrainerModal(false)
+                  setSelectedPrograms([])
+                  trainerForm.reset()
+                }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="h-6 w-6" />
@@ -529,41 +534,10 @@ const Dashboard = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Assigned Programs
-                </label>
-                <div className="border-2 border-gray-200 rounded-lg p-4 max-h-40 overflow-y-auto">
-                  {programs.length === 0 ? (
-                    <p className="text-sm text-gray-500">No programs available</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {programs.map((program) => (
-                        <label key={program.id} className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors">
-                          <input
-                            type="checkbox"
-                            value={program.id}
-                            checked={selectedPrograms.includes(String(program.id))}
-                            onChange={(e) => {
-                              const programId = String(program.id)
-                              if (e.target.checked) {
-                                setSelectedPrograms(prev => [...prev, programId])
-                              } else {
-                                setSelectedPrograms(prev => prev.filter(id => id !== programId))
-                              }
-                            }}
-                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-gray-700 font-medium">{program.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {selectedPrograms.length > 0 && (
-                  <p className="mt-2 text-sm text-blue-600 font-semibold">
-                    {selectedPrograms.length} program{selectedPrograms.length !== 1 ? 's' : ''} selected
-                  </p>
-                )}
+                <ProgramMultiSelect
+                  selectedProgramIds={selectedPrograms}
+                  onSelectionChange={setSelectedPrograms}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -621,7 +595,7 @@ const Dashboard = () => {
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
-                  onClick={() => setShowCreateTrainerModal(false)}
+                  onClick={() => { setShowCreateTrainerModal(false); setSelectedPrograms([]); trainerForm.reset() }}
                   className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                 >
                   Cancel

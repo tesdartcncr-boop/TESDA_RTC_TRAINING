@@ -3,6 +3,8 @@ from typing import Optional
 from datetime import datetime
 import enum
 
+DEFAULT_PROGRAM_SCHEDULE = "8 Hours/Day"
+
 
 class ProgramType(enum.Enum):
     INSTITUTION = "Institution"
@@ -32,6 +34,7 @@ class UserResponse(BaseModel):
 # Trainer schemas
 class TrainerBase(BaseModel):
     username: str
+    qualifications: Optional[str] = None
     trainer_name: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
@@ -41,6 +44,7 @@ class TrainerBase(BaseModel):
 class TrainerCreate(BaseModel):
     username: str
     password: str
+    qualifications: Optional[str] = None
     trainer_name: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
@@ -48,6 +52,7 @@ class TrainerCreate(BaseModel):
     nttc_expiration: Optional[datetime] = None
 
 class TrainerUpdate(BaseModel):
+    qualifications: Optional[str] = None
     trainer_name: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
@@ -57,7 +62,8 @@ class TrainerUpdate(BaseModel):
 class TrainerResponse(BaseModel):
     id: int
     username: str
-    trainer_name: str
+    qualifications: Optional[str] = None
+    trainer_name: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
@@ -94,7 +100,7 @@ class ProgramBase(BaseModel):
     description: Optional[str] = None
     type: ProgramType
     hours: int
-    schedule: Optional[str] = "8 Hours/Day"
+    schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
 
 class ProgramCreate(BaseModel):
@@ -102,7 +108,7 @@ class ProgramCreate(BaseModel):
     type: ProgramType
     description: Optional[str] = None
     hours: Optional[int] = None
-    schedule: Optional[str] = "8 Hours/Day"
+    schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
 
 class ProgramUpdate(BaseModel):
