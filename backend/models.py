@@ -48,6 +48,8 @@ class Program(Base):
     description = Column(Text)
     type = Column(Enum(ProgramType), nullable=False)
     hours = Column(Integer, nullable=False)
+    schedule = Column(String(20), default="8 Hours/Day")
+    days = Column(Integer)
     is_active = Column(Boolean, default=True)
     created_by = Column(Integer, nullable=False)  # Admin user ID
     created_at = Column(DateTime(timezone=True), server_default=func.now())

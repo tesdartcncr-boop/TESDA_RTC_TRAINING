@@ -1,10 +1,11 @@
-from typing import Annotated, List
+from typing import Annotated, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 
-from routers.auth import get_current_user, get_password_hash
-from schemas import TrainerCreate, TrainerResponse, TrainerUpdate
-from supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, select_rows, update_row
+from .auth import get_current_user, get_password_hash
+from ..schemas import TrainerCreate, TrainerResponse, TrainerUpdate
+from ..supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, select_rows, update_row
+from ..cache_manager import cache_manager
 
 router = APIRouter()
 
@@ -18,13 +19,51 @@ def raise_supabase_http(exc: SupabaseAPIError):
     raise HTTPException(status_code=status_code, detail=exc.message) from exc
 
 
-@router.get("/", response_model=List[TrainerResponse])
-async def get_trainers(current_user: CurrentUser):
+@router.get("/", response_model=Dict[str, Any])
+async def get_trainers(
+    current_user: CurrentUser,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    search: str = Query(None)
+):
+    """Get paginated trainers with optional search and caching"""
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
+    cache_key = cache_manager.get_cache_key("trainers", skip=skip, limit=limit, search=search)
+    
+    # Try to get from cache
+    cached = cache_manager.get(cache_key)
+    if cached:
+        return cached
+    
     try:
-        return select_rows("trainers", filters={"is_active": "eq.true"}, order="created_at.desc")
+        filters = {"is_active": "eq.true"}
+        all_trainers = select_rows("trainers", filters=filters, order="created_at.desc")
+        
+        # Apply search filter if provided
+        if search:
+            all_trainers = [
+                t for t in all_trainers
+                if search.lower() in t.get("trainer_name", "").lower()
+                or search.lower() in t.get("username", "").lower()
+                or search.lower() in t.get("qualifications", "").lower()
+            ]
+        
+        total = len(all_trainers)
+        trainers = all_trainers[skip:skip + limit]
+        
+        response = {
+            "data": trainers,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
+        
+        # Cache the result
+        cache_manager.set(cache_key, response)
+        return response
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -75,6 +114,9 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
                     "is_active": True,
                 },
             )
+            # Invalidate cache
+            cache_manager.clear_pattern("trainers:*")
+            return trainer
         except SupabaseAPIError:
             try:
                 delete_rows("users", filters={"id": f"eq.{user['id']}"}, returning="minimal")
@@ -82,7 +124,6 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
                 pass
             raise
 
-        return trainer
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -121,10 +162,11 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
     update_data = trainer_data.dict(exclude_unset=True)
     try:
         updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer_id}"})
+        # Invalidate cache
+        cache_manager.clear_pattern("trainers:*")
+        return updated_trainer or trainer
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
-
-    return updated_trainer or trainer
 
 
 @router.put("/profile", response_model=TrainerResponse)
@@ -171,6 +213,8 @@ async def delete_trainer(trainer_id: int, current_user: CurrentUser):
     try:
         update_row("trainers", {"is_active": False}, filters={"id": f"eq.{trainer_id}"})
         update_row("users", {"is_active": False}, filters={"id": f"eq.{trainer['user_id']}"})
+        # Invalidate cache
+        cache_manager.clear_pattern("trainers:*")
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 

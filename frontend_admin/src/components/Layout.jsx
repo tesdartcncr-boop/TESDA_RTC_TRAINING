@@ -5,11 +5,10 @@ import {
   Users, 
   BookOpen, 
   Home, 
+  CalendarDays,
   LogOut, 
   Menu,
-  X,
-  Bell,
-  Settings
+  X
 } from 'lucide-react'
 
 const Layout = () => {
@@ -21,6 +20,7 @@ const Layout = () => {
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Trainers', href: '/trainers', icon: Users },
     { name: 'Programs', href: '/programs', icon: BookOpen },
+    { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   ]
 
   const isActive = (href) => location.pathname === href
@@ -29,7 +29,12 @@ const Layout = () => {
     <div className="min-h-screen bg-gray-50 flex">
       {/* Mobile sidebar */}
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+        <button
+          type="button"
+          className="fixed inset-0 bg-gray-600 bg-opacity-75"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close sidebar overlay"
+        />
         <div className="fixed inset-y-0 left-0 flex flex-col w-64 bg-white">
           <div className="flex items-center justify-between h-16 px-6 border-b">
             <h2 className="text-xl font-semibold text-gray-900">Admin Portal</h2>

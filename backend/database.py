@@ -35,7 +35,6 @@ def normalize_database_url(database_url: str, supabase_url: str) -> str:
         return database_url
 
     corrected_username = f"postgres.{project_ref}"
-    corrected_netloc = corrected_username
     if password:
         corrected_netloc = f"{quote(corrected_username, safe='')}:{quote(password, safe='')}@{parsed_db.hostname}"
     else:

@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- Create trainers table
 CREATE TABLE IF NOT EXISTS trainers (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     username VARCHAR(50) UNIQUE NOT NULL,
-    trainer_name VARCHAR(100) NOT NULL,
+    trainer_name VARCHAR(100),
     qualifications TEXT,
     tm_number VARCHAR(50),
     tm_expiration TIMESTAMP,
@@ -35,9 +35,11 @@ CREATE TABLE IF NOT EXISTS programs (
     name VARCHAR(200) NOT NULL,
     description TEXT,
     type VARCHAR(50) NOT NULL CHECK (type IN ('Institution', 'Community-Based', 'Others')),
-    hours INTEGER NOT NULL,
+    hours INTEGER,
+    schedule VARCHAR(20) DEFAULT '8 Hours/Day' CHECK (schedule IN ('8 Hours/Day', '4 Hours/Day')),
+    days INTEGER,
     is_active BOOLEAN DEFAULT true,
-    created_by INTEGER NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

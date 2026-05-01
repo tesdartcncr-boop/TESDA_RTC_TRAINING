@@ -32,15 +32,22 @@ class UserResponse(BaseModel):
 # Trainer schemas
 class TrainerBase(BaseModel):
     username: str
-    trainer_name: str
+    trainer_name: Optional[str] = None
     qualifications: Optional[str] = None
     tm_number: Optional[str] = None
     tm_expiration: Optional[datetime] = None
     nttc_number: Optional[str] = None
     nttc_expiration: Optional[datetime] = None
 
-class TrainerCreate(TrainerBase):
+class TrainerCreate(BaseModel):
+    username: str
     password: str
+    trainer_name: Optional[str] = None
+    qualifications: Optional[str] = None
+    tm_number: Optional[str] = None
+    tm_expiration: Optional[datetime] = None
+    nttc_number: Optional[str] = None
+    nttc_expiration: Optional[datetime] = None
 
 class TrainerUpdate(BaseModel):
     trainer_name: Optional[str] = None
@@ -54,11 +61,11 @@ class TrainerResponse(BaseModel):
     id: int
     username: str
     trainer_name: str
-    qualifications: Optional[str]
-    tm_number: Optional[str]
-    tm_expiration: Optional[datetime]
-    nttc_number: Optional[str]
-    nttc_expiration: Optional[datetime]
+    qualifications: Optional[str] = None
+    tm_number: Optional[str] = None
+    tm_expiration: Optional[datetime] = None
+    nttc_number: Optional[str] = None
+    nttc_expiration: Optional[datetime] = None
     is_active: bool
     created_at: datetime
 
@@ -91,23 +98,34 @@ class ProgramBase(BaseModel):
     description: Optional[str] = None
     type: ProgramType
     hours: int
+    schedule: Optional[str] = "8 Hours/Day"
+    days: Optional[int] = None
 
-class ProgramCreate(ProgramBase):
-    pass
+class ProgramCreate(BaseModel):
+    name: str
+    type: ProgramType
+    description: Optional[str] = None
+    hours: Optional[int] = None
+    schedule: Optional[str] = "8 Hours/Day"
+    days: Optional[int] = None
 
 class ProgramUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     type: Optional[ProgramType] = None
     hours: Optional[int] = None
+    schedule: Optional[str] = None
+    days: Optional[int] = None
     is_active: Optional[bool] = None
 
 class ProgramResponse(BaseModel):
     id: int
     name: str
-    description: Optional[str]
+    description: Optional[str] = None
     type: str
     hours: int
+    schedule: Optional[str] = "8 Hours/Day"
+    days: Optional[int] = None
     is_active: bool
     created_at: datetime
 

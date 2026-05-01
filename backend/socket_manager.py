@@ -2,7 +2,7 @@ import logging
 
 import socketio
 
-from supabase_rest import SupabaseAPIError, insert_row, select_rows
+from .supabase_rest import SupabaseAPIError, insert_row, select_rows
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
+import { jwtDecode } from 'jwt-decode'
 
 const AuthContext = createContext()
 
@@ -19,8 +20,30 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('admin_token')
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-      fetchUser()
+      try {
+        // Decode token directly to restore session immediately
+        const decoded = jwtDecode(token)
+        // Check if token is still valid
+        if (decoded.exp && decoded.exp * 1000 > Date.now()) {
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+          // Set user object with correct shape - map 'sub' to 'username'
+          setUser({
+            username: decoded.sub,
+            user_type: decoded.user_type
+          })
+          // Try to fetch full user info in background (optional, doesn't remove token on failure)
+          fetchUser()
+        } else {
+          // Token expired
+          localStorage.removeItem('admin_token')
+          delete axios.defaults.headers.common['Authorization']
+        }
+      } catch (error) {
+        console.error('Failed to decode token:', error)
+        localStorage.removeItem('admin_token')
+        delete axios.defaults.headers.common['Authorization']
+        setLoading(false)
+      }
     } else {
       setLoading(false)
     }
@@ -29,12 +52,12 @@ export const AuthProvider = ({ children }) => {
   const fetchUser = async () => {
     try {
       const response = await axios.get('http://localhost:5000/api/auth/me')
+      // Update with full user data if backend call succeeds
       setUser(response.data)
+      setLoading(false)
     } catch (error) {
       console.error('Failed to fetch user:', error)
-      localStorage.removeItem('admin_token')
-      delete axios.defaults.headers.common['Authorization']
-    } finally {
+      // DON'T remove token - it might just be a temporary backend issue
       setLoading(false)
     }
   }

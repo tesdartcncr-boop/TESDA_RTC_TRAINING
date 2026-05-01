@@ -3,14 +3,18 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from routers.auth import get_current_user
-from schemas import NotificationCreate, NotificationResponse
-from supabase_rest import SupabaseAPIError, count_rows, insert_row, select_one, select_rows, update_row
+from .auth import get_current_user
+from ..schemas import NotificationCreate, NotificationResponse
+from ..supabase_rest import SupabaseAPIError, count_rows, insert_row, select_one, select_rows, update_row
 
 router = APIRouter()
 
 ADMIN_ACCESS_DENIED = "Access denied. Admin access required."
 CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+# Supabase filter constants
+FILTER_TRUE = "eq.true"
+ORDER_DESC = "created_at.desc"
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -33,19 +37,19 @@ async def get_dashboard_stats(current_user: CurrentUser):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
     try:
-        total_trainers = count_rows("trainers", filters={"is_active": "eq.true"})
-        total_programs = count_rows("programs", filters={"is_active": "eq.true"})
-        active_programs = select_rows("programs", filters={"is_active": "eq.true"}, select="hours")
+        total_trainers = count_rows("trainers", filters={"is_active": FILTER_TRUE})
+        total_programs = count_rows("programs", filters={"is_active": FILTER_TRUE})
+        active_programs = select_rows("programs", filters={"is_active": FILTER_TRUE}, select="hours")
         recent_trainers = select_rows(
             "trainers",
-            filters={"is_active": "eq.true"},
-            order="created_at.desc",
+            filters={"is_active": FILTER_TRUE},
+            order=ORDER_DESC,
             limit=5,
         )
         recent_programs = select_rows(
             "programs",
-            filters={"is_active": "eq.true"},
-            order="created_at.desc",
+            filters={"is_active": FILTER_TRUE},
+            order=ORDER_DESC,
             limit=5,
         )
     except SupabaseAPIError as exc:
@@ -66,7 +70,7 @@ async def get_notifications(current_user: CurrentUser):
         return select_rows(
             "notifications",
             filters={"user_id": f"eq.{current_user['id']}"},
-            order="created_at.desc",
+            order=ORDER_DESC,
         )
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -125,7 +129,7 @@ async def export_trainers(current_user: CurrentUser):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
     try:
-        trainers = select_rows("trainers", filters={"is_active": "eq.true"}, order="created_at.desc")
+        trainers = select_rows("trainers", filters={"is_active": FILTER_TRUE}, order=ORDER_DESC)
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -154,7 +158,7 @@ async def export_programs(current_user: CurrentUser):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
     try:
-        programs = select_rows("programs", filters={"is_active": "eq.true"}, order="created_at.desc")
+        programs = select_rows("programs", filters={"is_active": FILTER_TRUE}, order=ORDER_DESC)
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 

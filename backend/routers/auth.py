@@ -14,8 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from schemas import LoginRequest, OTPRequest, OTPVerify, Token, TrainerResponse, UserResponse
-from supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, update_row
+from ..schemas import LoginRequest, OTPRequest, OTPVerify, Token, TrainerResponse, UserResponse
+from ..supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, update_row
 
 env_path = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(env_path)
@@ -23,6 +23,10 @@ load_dotenv(env_path)
 router = APIRouter()
 security = HTTPBearer()
 logger = logging.getLogger(__name__)
+
+# Supabase filter constants
+FILTER_FALSE = "eq.false"
+FILTER_TRUE = "eq.true"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -120,7 +124,7 @@ def get_authorized_admin_email(email: str):
         "verified_admin_emails",
         filters={
             "email": f"eq.{normalize_email(email)}",
-            "is_active": "eq.true",
+            "is_active": FILTER_TRUE,
         },
     )
 
@@ -227,7 +231,7 @@ async def send_otp(otp_request: OTPRequest):
             "otp_verifications",
             filters={
                 "email": f"eq.{normalized_email}",
-                "is_verified": "eq.false",
+                "is_verified": FILTER_FALSE,
             },
             returning="minimal",
         )
@@ -253,7 +257,7 @@ async def send_otp(otp_request: OTPRequest):
             filters={
                 "email": f"eq.{normalized_email}",
                 "otp_code": f"eq.{otp_code}",
-                "is_verified": "eq.false",
+                "is_verified": FILTER_FALSE,
             },
             returning="minimal",
         )
@@ -289,7 +293,7 @@ async def verify_otp(otp_verify: OTPVerify):
             filters={
                 "email": f"eq.{normalized_email}",
                 "otp_code": f"eq.{otp_verify.otp_code}",
-                "is_verified": "eq.false",
+                "is_verified": FILTER_FALSE,
                 "expires_at": f"gt.{now_iso}",
             },
             order="id.desc",

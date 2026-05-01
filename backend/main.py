@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from routers import auth, trainers, programs, admin
-from socket_manager import sio
+from .routers import auth, trainers, programs, admin
+from .socket_manager import sio
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,6 +23,10 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
+        "http://localhost:3003",
+        "http://127.0.0.1:3003",
+        "http://localhost:3004",
+        "http://127.0.0.1:3004",
     ],
     allow_credentials=True,
     allow_methods=["*"],

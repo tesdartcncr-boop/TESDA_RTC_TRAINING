@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Trainers from './pages/Trainers'
 import Programs from './pages/Programs'
+import Schedules from './pages/Schedules'
 import Layout from './components/Layout'
 
 function App() {
@@ -22,25 +23,19 @@ function App() {
     <Routes>
       <Route 
         path="/login" 
-        element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} 
+        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />} 
       />
       <Route
-        path="/*"
-        element={
-          isAuthenticated ? (
-            <Layout>
-              <Routes>
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/trainers" element={<Trainers />} />
-                <Route path="/programs" element={<Programs />} />
-                <Route path="/" element={<Navigate to="/dashboard" />} />
-              </Routes>
-            </Layout>
-          ) : (
-            <Navigate to="/login" />
-          )
-        }
-      />
+        path="/"
+        element={isAuthenticated ? <Layout /> : <Navigate to="/login" />}
+      >
+        <Route index element={<Navigate to="dashboard" />} />
+        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="trainers" element={<Trainers />} />
+        <Route path="programs" element={<Programs />} />
+        <Route path="schedules" element={<Schedules />} />
+      </Route>
+      <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
     </Routes>
   )
 }
