@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react'
+import PropTypes from 'prop-types'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
@@ -14,6 +15,9 @@ export const useAuth = () => {
 }
 
 export const AuthProvider = ({ children }) => {
+  AuthProvider.propTypes = {
+    children: PropTypes.node.isRequired
+  }
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -51,9 +55,25 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/auth/me')
-      // Update with full user data if backend call succeeds
-      setUser(response.data)
+      // First get basic user info
+      const userResponse = await axios.get('http://localhost:5000/api/auth/me')
+      let userData = userResponse.data
+      console.log('User data fetched:', userData)
+      
+      // If it's a trainer, also fetch trainer-specific info
+      if (userData.user_type === 'trainer') {
+        try {
+          console.log('Fetching trainer info from background...')
+          const trainerResponse = await axios.get('http://localhost:5000/api/auth/trainer/me')
+          console.log('Trainer data fetched:', trainerResponse.data)
+          userData = { ...userData, ...trainerResponse.data }
+          console.log('Merged user data:', userData)
+        } catch (error) {
+          console.error('Failed to fetch trainer info:', error)
+        }
+      }
+      
+      setUser(userData)
       setLoading(false)
     } catch (error) {
       console.error('Failed to fetch user:', error)
@@ -65,12 +85,29 @@ export const AuthProvider = ({ children }) => {
   const login = async (credentials) => {
     try {
       const response = await axios.post('http://localhost:5000/api/auth/login', credentials)
-      const { token, user } = response.data
+      const { access_token } = response.data
       
-      localStorage.setItem('token', token)
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-      setUser(user)
+      localStorage.setItem('token', access_token)
+      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
       
+      // Fetch full user info including trainer data
+      const userResponse = await axios.get('http://localhost:5000/api/auth/me')
+      let userData = userResponse.data
+      
+      // If it's a trainer, also fetch trainer-specific info
+      if (userData.user_type === 'trainer') {
+        try {
+          console.log('Fetching trainer info...')
+          const trainerResponse = await axios.get('http://localhost:5000/api/auth/trainer/me')
+          console.log('Trainer data received:', trainerResponse.data)
+          userData = { ...userData, ...trainerResponse.data }
+          console.log('Merged user data:', userData)
+        } catch (error) {
+          console.error('Failed to fetch trainer info:', error)
+        }
+      }
+      
+      setUser(userData)
       toast.success('Login successful')
       return { success: true }
     } catch (error) {
@@ -98,7 +135,7 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     loading,
     isAuthenticated: !!user,
@@ -106,7 +143,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateProfile,
     fetchUser
-  }
+  }), [user, loading])
 
   return (
     <AuthContext.Provider value={value}>

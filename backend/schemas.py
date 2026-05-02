@@ -134,6 +134,13 @@ class ProgramResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Schedule schemas
+class ScheduleUpdate(BaseModel):
+    hours_per_day: int
+    status: Optional[str] = None
+    schedule_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
 # Notification schemas
 class NotificationBase(BaseModel):
     title: str
@@ -149,6 +156,21 @@ class NotificationResponse(BaseModel):
     message: str
     is_read: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AuthorizedEmailCreate(BaseModel):
+    email: EmailStr
+
+
+class AuthorizedEmailResponse(BaseModel):
+    id: int
+    email: EmailStr
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -6,6 +6,7 @@ import {
   BookOpen, 
   Home, 
   CalendarDays,
+  MailCheck,
   LogOut, 
   Menu,
   X
@@ -21,6 +22,7 @@ const Layout = () => {
     { name: 'Trainers', href: '/trainers', icon: Users },
     { name: 'Programs', href: '/programs', icon: BookOpen },
     { name: 'Schedules', href: '/schedules', icon: CalendarDays },
+    { name: 'Authorized Emails', href: '/authorized-emails', icon: MailCheck },
   ]
 
   const isActive = (href) => location.pathname === href

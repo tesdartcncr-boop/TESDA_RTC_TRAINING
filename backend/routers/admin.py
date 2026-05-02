@@ -4,8 +4,8 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .auth import get_current_user
-from ..schemas import NotificationCreate, NotificationResponse
-from ..supabase_rest import SupabaseAPIError, count_rows, insert_row, select_one, select_rows, update_row
+from ..schemas import AuthorizedEmailCreate, AuthorizedEmailResponse, NotificationCreate, NotificationResponse
+from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, insert_row, select_one, select_rows, update_row
 
 router = APIRouter()
 
@@ -29,6 +29,14 @@ def format_date(value):
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return parsed.strftime("%Y-%m-%d")
     return value.strftime("%Y-%m-%d")
+
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def utc_now_iso() -> str:
+    return datetime.now().isoformat()
 
 
 @router.get("/dashboard/stats")
@@ -175,3 +183,88 @@ async def export_programs(current_user: CurrentUser):
         )
 
     return {"data": export_data}
+
+
+@router.get("/authorized-emails", response_model=List[AuthorizedEmailResponse])
+async def get_authorized_emails(current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    try:
+        return select_rows(
+            "verified_admin_emails",
+            filters={"is_active": FILTER_TRUE},
+            order=ORDER_DESC,
+        )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.post("/authorized-emails", response_model=AuthorizedEmailResponse)
+async def add_authorized_email(payload: AuthorizedEmailCreate, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    normalized = normalize_email(payload.email)
+
+    try:
+        existing = select_one(
+            "verified_admin_emails",
+            filters={"email": f"eq.{normalized}"},
+        )
+        if existing:
+            updated = update_row(
+                "verified_admin_emails",
+                {
+                    "is_active": True,
+                    "updated_at": utc_now_iso(),
+                },
+                filters={"id": f"eq.{existing['id']}"},
+            )
+            return updated or existing
+
+        return insert_row(
+            "verified_admin_emails",
+            {
+                "email": normalized,
+                "is_active": True,
+                "created_at": utc_now_iso(),
+                "updated_at": utc_now_iso(),
+            },
+        )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.delete("/authorized-emails/{email_id}")
+async def remove_authorized_email(email_id: int, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    try:
+        existing = select_one("verified_admin_emails", filters={"id": f"eq.{email_id}"})
+        if not existing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authorized email not found")
+
+        update_row(
+            "verified_admin_emails",
+            {
+                "is_active": False,
+                "updated_at": utc_now_iso(),
+            },
+            filters={"id": f"eq.{email_id}"},
+        )
+
+        # Remove any pending unverified OTP rows for this email to prevent stale attempts
+        delete_rows(
+            "otp_verifications",
+            filters={
+                "email": f"eq.{existing['email']}",
+                "is_verified": "eq.false",
+            },
+            returning="minimal",
+        )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    return {"message": "Authorized email removed"}

@@ -1,18 +1,29 @@
 import React, { useEffect, useCallback, useState } from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Search, Filter, ChevronDown, Trash2 } from 'lucide-react'
 
 const STATUS_COLORS = {
-  complete: { bg: 'bg-green-500', label: 'Complete', shortLabel: '✓' },
-  absent: { bg: 'bg-red-500', label: 'Absent', shortLabel: '✗' },
-  suspended: { bg: 'bg-yellow-500', label: 'Suspended', shortLabel: '⊗' },
-  leave: { bg: 'bg-blue-500', label: 'Leave', shortLabel: '◐' },
+  complete: { bg: 'bg-green-500', tint: 'bg-green-50', border: 'border-green-200', label: 'Complete', shortLabel: '✓' },
+  absent: { bg: 'bg-red-500', tint: 'bg-red-50', border: 'border-red-200', label: 'Absent', shortLabel: '✗' },
+  suspended: { bg: 'bg-yellow-500', tint: 'bg-yellow-50', border: 'border-yellow-200', label: 'Suspended', shortLabel: '⊗' },
+  leave: { bg: 'bg-blue-500', tint: 'bg-sky-50', border: 'border-sky-200', label: 'Leave', shortLabel: '◐' },
 }
 
-const STATUS_DOT_COLORS = {
-  complete: 'bg-green-500',
-  absent: 'bg-red-500',
-  suspended: 'bg-yellow-500',
-  leave: 'bg-blue-500',
+const PROGRAM_TYPE_ORDER = ['Community-Based', 'Institution', 'Others', 'Uncategorized']
+const PROGRAM_TYPE_BADGE = {
+  'Community-Based': 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  Institution: 'bg-blue-100 text-blue-700 border border-blue-200',
+  Others: 'bg-slate-100 text-slate-700 border border-slate-200',
+  Uncategorized: 'bg-amber-100 text-amber-700 border border-amber-200',
+}
+
+const normalizeProgramType = (value) => {
+  const type = (value || '').toString().trim().toLowerCase()
+
+  if (type === 'community-based' || type === 'community based') return 'Community-Based'
+  if (type === 'institution' || type === 'institution-based' || type === 'institution based') return 'Institution'
+  if (type === 'others' || type === 'other') return 'Others'
+
+  return 'Uncategorized'
 }
 
 export default function Schedules() {
@@ -27,6 +38,10 @@ export default function Schedules() {
   const [isSaving, setIsSaving] = useState(false)
   const [selectedCell, setSelectedCell] = useState(null)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [programSearchTerm, setProgramSearchTerm] = useState('')
+  const [programFilterType, setProgramFilterType] = useState('all')
+  const [showProgramFilters, setShowProgramFilters] = useState(false)
+  const [deletingAssignmentId, setDeletingAssignmentId] = useState(null)
 
   const fetchTrainers = useCallback(async () => {
     try {
@@ -63,6 +78,9 @@ export default function Schedules() {
         setSelectedTrainer(trainer)
         setSelectedProgram(null)
         setScheduleData({})
+        setProgramSearchTerm('')
+        setProgramFilterType('all')
+        setShowProgramFilters(false)
       }
     } catch (e) {
       console.error('Failed to fetch trainer programs', e)
@@ -93,6 +111,36 @@ export default function Schedules() {
     setHoursPerDay(8)
   }
 
+  const handleDeleteAssignedSchedule = async (program) => {
+    if (!selectedTrainer || !program?.program_id) return
+    if (!globalThis.confirm(`Remove assigned schedule for ${program.program_name}?`)) return
+
+    try {
+      setDeletingAssignmentId(program.program_id)
+      const token = localStorage.getItem('admin_token')
+      const res = await fetch(
+        `http://localhost:5000/api/schedules/trainer/${selectedTrainer.id}/program/${program.program_id}/assignment`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      )
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Failed to delete assigned schedule')
+      }
+
+      setTrainerPrograms((prev) => prev.filter((item) => item.program_id !== program.program_id))
+      setScheduleData({})
+    } catch (e) {
+      console.error('Failed to delete assigned schedule', e)
+      setError(e.message || 'Failed to delete assigned schedule')
+    } finally {
+      setDeletingAssignmentId(null)
+    }
+  }
+
   const handleCellClick = (dayNumber) => {
     setSelectedCell(dayNumber)
     setShowStatusMenu(true)
@@ -105,6 +153,8 @@ export default function Schedules() {
       const token = localStorage.getItem('admin_token')
       const currentStatus = scheduleData[selectedCell]?.status
       const newStatus = currentStatus === status ? null : status
+
+      console.log(`Updating day ${selectedCell} status to:`, newStatus)
 
       const res = await fetch(
         `http://localhost:5000/api/schedules/trainer/${selectedTrainer.id}/program/${selectedProgram.program_id}/day/${selectedCell}`,
@@ -122,14 +172,20 @@ export default function Schedules() {
       )
       if (res.ok) {
         const updated = await res.json()
+        console.log('API Response:', updated)
         setScheduleData((prev) => ({
           ...prev,
           [selectedCell]: updated.data,
         }))
+        console.log('Schedule data updated for day:', selectedCell, updated.data)
+      } else {
+        const errorText = await res.text()
+        console.error('API Error:', res.status, errorText)
+        setError(`Failed to update status: ${res.status}`)
       }
     } catch (e) {
       console.error('Failed to update schedule', e)
-      setError('Failed to update status')
+      setError('Failed to update status: ' + e.message)
     } finally {
       setIsSaving(false)
       setShowStatusMenu(false)
@@ -146,6 +202,26 @@ export default function Schedules() {
     if (!selectedProgram) return 0
     return (selectedProgram.program_days || 1) * 8
   }
+
+  const filteredTrainerPrograms = trainerPrograms
+    .map((program) => ({
+      ...program,
+      normalizedType: normalizeProgramType(program.program_type),
+    }))
+    .filter((program) => {
+      if (!programSearchTerm.trim()) return true
+      return (program.program_name || '').toLowerCase().includes(programSearchTerm.toLowerCase())
+    })
+    .filter((program) => {
+      if (programFilterType === 'all') return true
+      return program.normalizedType === programFilterType
+    })
+    .sort((a, b) => {
+      const aTypeIndex = PROGRAM_TYPE_ORDER.indexOf(a.normalizedType)
+      const bTypeIndex = PROGRAM_TYPE_ORDER.indexOf(b.normalizedType)
+      if (aTypeIndex !== bTypeIndex) return aTypeIndex - bTypeIndex
+      return (a.program_name || '').localeCompare(b.program_name || '')
+    })
 
   // Trainer selection view
   if (!selectedTrainer) {
@@ -223,32 +299,106 @@ export default function Schedules() {
               <p className="text-slate-600 text-lg">No programs assigned to this trainer yet</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {trainerPrograms.map((program) => (
-                <button
-                  key={program.program_id}
-                  onClick={() => handleProgramSelect(program)}
-                  className="group relative overflow-hidden rounded-xl bg-white p-8 shadow-lg hover:shadow-2xl transition-all duration-300 border-2 border-slate-200 hover:border-blue-500 text-left"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative z-10">
-                    <h3 className="text-2xl font-bold text-slate-900 mb-3">{program.program_name}</h3>
-                    <div className="space-y-2 text-slate-600">
-                      <p className="flex justify-between">
-                        <span className="font-medium">Duration:</span>
-                        <span className="font-semibold text-slate-900">{program.program_days} days</span>
-                      </p>
-                      <p className="flex justify-between">
-                        <span className="font-medium">Schedule:</span>
-                        <span className="font-semibold text-slate-900">{program.program_schedule}</span>
-                      </p>
+            <div>
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm mb-6">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={programSearchTerm}
+                      onChange={(e) => setProgramSearchTerm(e.target.value)}
+                      placeholder="Search by program name..."
+                      className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    />
+                  </div>
+
+                  <div className="relative md:w-52">
+                    <button
+                      type="button"
+                      onClick={() => setShowProgramFilters((prev) => !prev)}
+                      className="w-full inline-flex items-center justify-between px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:border-slate-400 transition-colors"
+                    >
+                      <span className="inline-flex items-center gap-2 font-semibold">
+                        <Filter size={16} />
+                        Filters
+                      </span>
+                      <ChevronDown size={16} className={`transition-transform ${showProgramFilters ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showProgramFilters && (
+                      <div className="absolute right-0 z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg p-3">
+                        <label htmlFor="program-type-filter" className="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Program Type</label>
+                        <select
+                          id="program-type-filter"
+                          value={programFilterType}
+                          onChange={(e) => setProgramFilterType(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                        >
+                          <option value="all">All Types</option>
+                          <option value="Community-Based">Community-Based</option>
+                          <option value="Institution">Institution</option>
+                          <option value="Others">Others</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {filteredTrainerPrograms.length === 0 ? (
+                <div className="bg-white rounded-lg p-8 text-center border border-slate-200">
+                  <p className="text-slate-600 text-lg">No programs match your search/filter</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {filteredTrainerPrograms.map((program) => (
+                    <div
+                      key={program.program_id}
+                      className="group relative overflow-hidden rounded-xl bg-white p-6 shadow-lg hover:shadow-2xl transition-all duration-300 border-2 border-slate-200 hover:border-blue-500"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleProgramSelect(program)}
+                        className="w-full text-left"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div className="relative z-10">
+                          <h3 className="text-2xl font-bold text-slate-900 mb-3">{program.program_name}</h3>
+                          <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold mb-3 ${PROGRAM_TYPE_BADGE[program.normalizedType] || PROGRAM_TYPE_BADGE.Uncategorized}`}>
+                            {program.normalizedType}
+                          </span>
+                          <div className="space-y-2 text-slate-600">
+                            <p className="flex justify-between">
+                              <span className="font-medium">Duration:</span>
+                              <span className="font-semibold text-slate-900">{program.program_days} days</span>
+                            </p>
+                            <p className="flex justify-between">
+                              <span className="font-medium">Schedule:</span>
+                              <span className="font-semibold text-slate-900">{program.program_schedule}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="absolute right-6 top-6 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-2xl">
+                          →
+                        </div>
+                      </button>
+
+                      <div className="relative z-10 mt-5 pt-4 border-t border-slate-200 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAssignedSchedule(program)}
+                          disabled={deletingAssignmentId === program.program_id}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 size={16} />
+                          {deletingAssignmentId === program.program_id ? 'Deleting...' : 'Delete Assigned'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div className="absolute right-6 top-6 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-2xl">
-                    →
-                  </div>
-                </button>
-              ))}
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -335,13 +485,17 @@ export default function Schedules() {
               {Array.from({ length: totalDays }, (_, i) => i + 1).map((day) => {
                 const entry = scheduleData[day]
                 const status = entry?.status
-                const dotColor = status ? STATUS_DOT_COLORS[status] : null
                 const isSelected = selectedCell === day
                 let cellClassName = 'bg-white border-slate-300 text-slate-900 hover:border-slate-400 hover:bg-slate-50'
 
-                if (isSelected) {
-                  cellClassName = 'bg-blue-100 border-blue-400 text-slate-900 shadow-sm'
+                if (status) {
+                  cellClassName = `${STATUS_COLORS[status].tint} ${STATUS_COLORS[status].border} text-slate-900`
                 }
+
+                if (isSelected) {
+                  cellClassName += ' ring-2 ring-blue-400 shadow-sm'
+                }
+
 
                 return (
                   <button
@@ -350,16 +504,22 @@ export default function Schedules() {
                     className={`relative flex aspect-square min-h-24 w-full flex-col items-center justify-center rounded-xl border-2 px-2 py-3 font-bold text-sm transition-all ${cellClassName}`}
                     title={`Day ${day} - ${status ? STATUS_COLORS[status].label : 'Click to set status'}`}
                   >
-                    <span className="text-[11px] uppercase tracking-[0.2em] opacity-75">Day</span>
-                    <span className="mt-1 text-lg leading-none">{day}</span>
-                    <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-75">
-                      {status ? STATUS_COLORS[status].label : 'Open'}
-                    </span>
-                    {dotColor && (
-                      <span
-                        className={`absolute right-2 top-2 h-5 w-5 rounded-full border-2 border-white shadow-lg ring-2 ring-white ${dotColor}`}
-                        aria-hidden="true"
-                      />
+                    {status ? (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span className="text-[11px] uppercase tracking-[0.2em] opacity-75">Day</span>
+                        <div className={`flex items-center justify-center w-12 h-12 rounded-full ${STATUS_COLORS[status].bg} text-white text-2xl font-bold shadow-lg`}>
+                          {day}
+                        </div>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                          {STATUS_COLORS[status].label}
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-[11px] uppercase tracking-[0.2em] opacity-75">Day</span>
+                        <span className="mt-1 text-lg leading-none">{day}</span>
+                        <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-75">Open</span>
+                      </>
                     )}
                   </button>
                 )

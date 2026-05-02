@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import Trainers from './pages/Trainers'
 import Programs from './pages/Programs'
 import Schedules from './pages/Schedules'
+import AuthorizedEmails from './pages/AuthorizedEmails'
 import Layout from './components/Layout'
 
 function App() {
@@ -45,6 +46,7 @@ function App() {
         <Route path="trainers" element={<Trainers />} />
         <Route path="programs" element={<Programs />} />
         <Route path="schedules" element={<Schedules />} />
+        <Route path="authorized-emails" element={<AuthorizedEmails />} />
       </Route>
       <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
     </Routes>

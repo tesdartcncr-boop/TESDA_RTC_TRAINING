@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from backend.database import get_db
 from backend.supabase_rest import select_rows, insert_row, update_row, delete_rows, select_one
-from backend.schemas import TrainerResponse, ProgramResponse
+from backend.schemas import TrainerResponse, ProgramResponse, ScheduleUpdate
 from datetime import datetime
 
 router = APIRouter()
@@ -17,7 +17,7 @@ async def get_trainer_programs_schedules(trainer_id: int, db: Session = Depends(
         assignments = select_rows(
             table="trainer_programs",
             filters=filters,
-            select="*,program_id(id,name,days,schedule)"
+            select="*,program_id(id,name,type,days,schedule)"
         )
         
         result = []
@@ -33,6 +33,7 @@ async def get_trainer_programs_schedules(trainer_id: int, db: Session = Depends(
                         "trainer_id": trainer_id,
                         "program_id": program.get("id"),
                         "program_name": program.get("name"),
+                        "program_type": program.get("type"),
                         "program_days": program.get("days"),
                         "program_schedule": program.get("schedule"),
                     })
@@ -68,18 +69,15 @@ async def create_or_update_schedule_day(
     trainer_id: int,
     program_id: int,
     day_number: int,
-    hours_per_day: int,
-    status: str = None,
-    schedule_date: str = None,
-    notes: str = None,
+    request: ScheduleUpdate,
     db: Session = Depends(get_db)
 ):
     """Create or update a single day's schedule entry"""
     try:
-        if hours_per_day not in [4, 8]:
+        if request.hours_per_day not in [4, 8]:
             raise HTTPException(status_code=400, detail="hours_per_day must be 4 or 8")
         
-        if status and status not in ['complete', 'absent', 'suspended', 'leave']:
+        if request.status and request.status not in ['complete', 'absent', 'suspended', 'leave']:
             raise HTTPException(status_code=400, detail="Invalid status value")
         
         # Try to find existing entry
@@ -94,31 +92,41 @@ async def create_or_update_schedule_day(
             "trainer_id": trainer_id,
             "program_id": program_id,
             "day_number": day_number,
-            "hours_per_day": hours_per_day,
+            "hours_per_day": request.hours_per_day,
+            "status": request.status,  # Include status even if None
             "updated_at": datetime.now().isoformat()
         }
         
-        if status:
-            schedule_data["status"] = status
-        if schedule_date:
-            schedule_data["schedule_date"] = schedule_date
-        if notes:
-            schedule_data["notes"] = notes
+        if request.schedule_date:
+            schedule_data["schedule_date"] = request.schedule_date
+        if request.notes:
+            schedule_data["notes"] = request.notes
+        
+        print(f"[DEBUG] Saving schedule for trainer {trainer_id}, program {program_id}, day {day_number}")
+        print(f"[DEBUG] Data to save: {schedule_data}")
+        print(f"[DEBUG] Existing record: {existing}")
         
         if existing:
             # Update using filters instead of record_id
-            update_row(
+            print(f"[DEBUG] Updating existing record...")
+            result = update_row(
                 table="schedules",
                 payload=schedule_data,
                 filters=filters
             )
-            return {"status": "updated", "data": schedule_data}
+            print(f"[DEBUG] Update result: {result}")
+            return {"status": "updated", "data": result}
         else:
             # Create
             schedule_data["created_at"] = datetime.now().isoformat()
+            print(f"[DEBUG] Creating new record...")
             result = insert_row(table="schedules", payload=schedule_data)
+            print(f"[DEBUG] Insert result: {result}")
             return {"status": "created", "data": result}
     except Exception as e:
+        print(f"[ERROR] Exception in create_or_update_schedule_day: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/trainer/{trainer_id}/program/{program_id}/batch")
@@ -171,5 +179,38 @@ async def delete_schedule_entry(schedule_id: int, db: Session = Depends(get_db))
         filters = {"id": f"eq.{schedule_id}"}
         delete_rows(table="schedules", filters=filters)
         return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/trainer/{trainer_id}/program/{program_id}/assignment")
+async def delete_trainer_program_assignment(
+    trainer_id: int,
+    program_id: int,
+    db: Session = Depends(get_db),
+):
+    """Delete a trainer-program assignment and all related schedule rows."""
+    try:
+        assignment_filters = {
+            "trainer_id": f"eq.{trainer_id}",
+            "program_id": f"eq.{program_id}",
+        }
+        assignment = select_one("trainer_programs", filters=assignment_filters)
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Assigned schedule not found")
+
+        schedule_filters = {
+            "trainer_id": f"eq.{trainer_id}",
+            "program_id": f"eq.{program_id}",
+        }
+        deleted_schedules = delete_rows("schedules", filters=schedule_filters)
+        delete_rows("trainer_programs", filters=assignment_filters)
+
+        return {
+            "status": "deleted",
+            "deleted_schedule_rows": len(deleted_schedules or []),
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

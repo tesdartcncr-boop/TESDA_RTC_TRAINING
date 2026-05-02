@@ -116,3 +116,49 @@ CREATE INDEX IF NOT EXISTS idx_schedules_trainer_program ON schedules(trainer_id
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_email ON otp_verifications(email);
 CREATE INDEX IF NOT EXISTS idx_verified_admin_emails_email ON verified_admin_emails(email);
+
+-- ============================================================================
+-- MIGRATION: Add missing columns to existing tables (fixes for existing setups)
+-- ============================================================================
+-- This section ensures that if you run this schema on an existing database,
+-- any missing columns will be added automatically
+
+-- Add missing columns to schedules table if they don't exist
+ALTER TABLE IF EXISTS schedules 
+ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT NULL;
+
+ALTER TABLE IF EXISTS schedules 
+ADD COLUMN IF NOT EXISTS schedule_date DATE;
+
+ALTER TABLE IF EXISTS schedules 
+ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Add status constraint if it doesn't exist
+ALTER TABLE IF EXISTS schedules 
+DROP CONSTRAINT IF EXISTS schedules_status_check;
+
+ALTER TABLE IF EXISTS schedules 
+ADD CONSTRAINT schedules_status_check CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave'));
+
+-- Add missing columns to trainer_programs table if they don't exist
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS schedule_date DATE;
+
+-- Add missing columns to users table if they don't exist
+ALTER TABLE IF EXISTS users
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Add missing columns to trainers table if they don't exist
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Add missing columns to programs table if they don't exist
+ALTER TABLE IF EXISTS programs
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- ============================================================================
+-- Verification: Check schedules table structure
+-- ============================================================================
+-- Run this query to verify the schedules table has all required columns:
+-- SELECT column_name, data_type, is_nullable FROM information_schema.columns 
+-- WHERE table_name = 'schedules' ORDER BY ordinal_position;
