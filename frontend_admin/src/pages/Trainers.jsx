@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import PropTypes from 'prop-types'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Users, UserPlus, Search, Edit, Trash2, Download, Award, BookOpen, Plus, Loader, AlertCircle, X } from 'lucide-react'
+import { Users, UserPlus, Search, Edit, Trash2, Download, Award, BookOpen, Plus, Loader, AlertCircle, CheckCircle, X } from 'lucide-react'
 import { cacheManager } from '../utils/cacheManager'
 import { getSocket } from '../utils/socket'
 
@@ -26,6 +26,7 @@ const Trainers = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [successMessage, setSuccessMessage] = useState(null)
+  const [assignmentRefreshKey, setAssignmentRefreshKey] = useState(0)
   const [skip, setSkip] = useState(0)
   const [limit] = useState(12)
   const [hasMore, setHasMore] = useState(true)
@@ -34,6 +35,18 @@ const Trainers = () => {
   const { register, handleSubmit, reset, formState: { errors }, setValue } = useForm()
 
   useEffect(() => { if (successMessage) { const t = setTimeout(() => setSuccessMessage(null), 3000); return () => clearTimeout(t) } }, [successMessage])
+
+  const getErrorMessage = useCallback(async (response, fallbackMessage) => {
+    const responseText = await response.text()
+    if (!responseText) return fallbackMessage
+
+    try {
+      const errorData = JSON.parse(responseText)
+      return errorData.detail || errorData.message || fallbackMessage
+    } catch {
+      return responseText
+    }
+  }, [])
 
   const fetchPrograms = useCallback(async () => {
     try {
@@ -128,10 +141,16 @@ const Trainers = () => {
       const currentAssignments = await fetchTrainerPrograms(selectedTrainer.id)
       const currentIds = currentAssignments.map(a => String(a.program.id))
       const toAdd = selectedEditPrograms.filter(id => !currentIds.includes(id))
-      for (const pid of toAdd) { await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trainer_id: selectedTrainer.id, program_id: Number.parseInt(pid, 10), assigned_by: 1 }) }) }
+      for (const pid of toAdd) {
+        const assignmentRes = await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trainer_id: selectedTrainer.id, program_id: Number.parseInt(pid, 10), assigned_by: 1 }) })
+        if (!assignmentRes.ok) throw new Error(await getErrorMessage(assignmentRes, 'Failed to assign selected program'))
+      }
       const toRemove = currentIds.filter(id => !selectedEditPrograms.includes(id))
-      for (const pid of toRemove) { await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs/${pid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }) }
-      cacheManager.clearPattern('trainers:.*'); setSkip(0); await fetchTrainers(0, false); setShowEditModal(false); setSelectedTrainer(null); setSelectedEditPrograms([]); reset(); setSuccessMessage('Trainer updated!')
+      for (const pid of toRemove) {
+        const removeRes = await fetch(`http://localhost:5000/api/trainers/${selectedTrainer.id}/programs/${pid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
+        if (!removeRes.ok) throw new Error(await getErrorMessage(removeRes, 'Failed to remove selected program'))
+      }
+      cacheManager.clearPattern('trainers:.*'); setSkip(0); setAssignmentRefreshKey((current) => current + 1); await fetchTrainers(0, false); setShowEditModal(false); setSelectedTrainer(null); setSelectedEditPrograms([]); reset(); setSuccessMessage('Trainer updated!')
     } catch (e) { setError(e.message) } finally { setIsLoading(false) }
   }
 
@@ -149,15 +168,22 @@ const Trainers = () => {
     setIsLoading(true)
     try {
       const token = localStorage.getItem('admin_token')
-      await Promise.all(quickAssignSelectedPrograms.map((programId) => fetch(`http://localhost:5000/api/trainers/${quickAssignTarget.id}/programs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ trainer_id: quickAssignTarget.id, program_id: Number.parseInt(programId, 10), assigned_by: 1 })
-      })))
+      await Promise.all(quickAssignSelectedPrograms.map(async (programId) => {
+        const res = await fetch(`http://localhost:5000/api/trainers/${quickAssignTarget.id}/programs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ trainer_id: quickAssignTarget.id, program_id: Number.parseInt(programId, 10), assigned_by: 1 })
+        });
+        if (!res.ok) {
+          throw new Error(await getErrorMessage(res, 'Failed to assign selected program'));
+        }
+        return res;
+      }))
       setSelectedEditPrograms((current) => Array.from(new Set([...current, ...quickAssignSelectedPrograms])))
       closeQuickAssignModal()
       setSuccessMessage('Programs assigned!')
       cacheManager.clearPattern('trainers:.*')
+      setAssignmentRefreshKey((current) => current + 1)
       await fetchTrainers(0, false)
     } catch (e) { setError(e.message) } finally { setIsLoading(false) }
   }
@@ -226,7 +252,7 @@ const Trainers = () => {
 
   return (
     <div className="space-y-6">
-      {successMessage && <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-md"><div className="flex items-center"><div className="h-5 w-5 text-green-500 mr-3 font-bold">✓</div><p className="text-green-800 font-semibold">{successMessage}</p><button onClick={() => setSuccessMessage(null)} className="ml-auto text-green-500 hover:text-green-700"><X className="h-4 w-4" /></button></div></div>}
+      {successMessage && <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-md"><div className="flex items-center"><CheckCircle className="h-5 w-5 text-green-500 mr-3" /><p className="text-green-800 font-semibold">{successMessage}</p><button onClick={() => setSuccessMessage(null)} className="ml-auto text-green-500 hover:text-green-700"><X className="h-4 w-4" /></button></div></div>}
       {error && <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md"><div className="flex items-center"><AlertCircle className="h-5 w-5 text-red-500 mr-3" /><p className="text-red-800">{error}</p><button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700"><X className="h-4 w-4" /></button></div></div>}
 
       <div className="flex items-center justify-between">
@@ -263,7 +289,7 @@ const Trainers = () => {
                         <p className="font-semibold text-gray-700 flex items-center"><BookOpen className="h-4 w-4 mr-1 text-blue-600" />Assigned Programs:</p>
                         <button onClick={() => openQuickAssignModal(trainer)} className="inline-flex items-center px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"><Plus className="h-3 w-3 mr-1" />Add more</button>
                       </div>
-                      <TrainerProgramsList trainerId={trainer.id} fetchTrainerPrograms={fetchTrainerPrograms} />
+                      <TrainerProgramsList key={`${trainer.id}-${assignmentRefreshKey}`} trainerId={trainer.id} fetchTrainerPrograms={fetchTrainerPrograms} />
                     </div>
 
                     <div className="space-y-2">
@@ -475,7 +501,7 @@ function EditProgramItem({ programId, program, onRemove }) {
 }
 
 EditProgramItem.propTypes = {
-  programId: PropTypes.number.isRequired,
+  programId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
   program: PropTypes.shape({
     name: PropTypes.string,
   }),

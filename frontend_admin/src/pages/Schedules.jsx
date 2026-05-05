@@ -44,6 +44,13 @@ export default function Schedules() {
   const [showProgramFilters, setShowProgramFilters] = useState(false)
   const [deletingAssignmentId, setDeletingAssignmentId] = useState(null)
 
+  const applyProgramUpdate = useCallback((updatedProgram) => {
+    setSelectedProgram(updatedProgram)
+    setTrainerPrograms((prev) => prev.map((program) => (
+      program.program_id === updatedProgram.program_id ? { ...program, ...updatedProgram } : program
+    )))
+  }, [])
+
   const fetchTrainers = useCallback(async () => {
     try {
       setLoading(true)
@@ -133,7 +140,7 @@ export default function Schedules() {
     }
     setSelectedProgram(program)
     setSelectedCell(null)
-    setHoursPerDay(8)
+    setHoursPerDay(program.hours_per_day || 8)
   }
 
   const handleDeleteAssignedSchedule = async (program) => {
@@ -217,15 +224,58 @@ export default function Schedules() {
     }
   }
 
+  const handleHoursPerDayChange = async (nextHours) => {
+    if (!selectedTrainer || !selectedProgram || nextHours === hoursPerDay || isSaving) return
+
+    try {
+      setIsSaving(true)
+      setError(null)
+      const token = localStorage.getItem('admin_token')
+      const res = await fetch(
+        `http://localhost:5000/api/schedules/trainer/${selectedTrainer.id}/program/${selectedProgram.program_id}/hours-per-day`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ hours_per_day: nextHours }),
+        }
+      )
+
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(errorText || 'Failed to update hours per day')
+      }
+
+      const updatedProgram = await res.json()
+      setHoursPerDay(updatedProgram.hours_per_day || nextHours)
+      applyProgramUpdate(updatedProgram)
+      setSelectedCell((currentDay) => (
+        currentDay && currentDay > updatedProgram.program_days ? updatedProgram.program_days || null : currentDay
+      ))
+      setScheduleData((prev) => Object.fromEntries(
+        Object.entries(prev).map(([dayNumber, entry]) => [dayNumber, { ...entry, hours_per_day: nextHours }])
+      ))
+    } catch (e) {
+      console.error('Failed to update hours per day', e)
+      setError(e.message || 'Failed to update hours per day')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const calculateDaysNeeded = () => {
     if (!selectedProgram) return 0
-    const totalDays = selectedProgram.program_days || 1
-    return hoursPerDay === 8 ? totalDays : Math.ceil(totalDays * 8 / hoursPerDay)
+    if (selectedProgram.program_total_hours) {
+      return Math.ceil(selectedProgram.program_total_hours / hoursPerDay)
+    }
+    return selectedProgram.program_days || 0
   }
 
   const calculateTotalHours = () => {
     if (!selectedProgram) return 0
-    return (selectedProgram.program_days || 1) * 8
+    return selectedProgram.program_total_hours || ((selectedProgram.program_days || 0) * hoursPerDay)
   }
 
   const filteredTrainerPrograms = trainerPrograms
@@ -471,12 +521,13 @@ export default function Schedules() {
                   {[4, 8].map((hours) => (
                     <button
                       key={hours}
-                      onClick={() => setHoursPerDay(hours)}
+                      onClick={() => handleHoursPerDayChange(hours)}
+                      disabled={isSaving}
                       className={`px-6 py-3 rounded-lg font-bold text-lg transition-all ${
                         hoursPerDay === hours
                           ? 'bg-blue-600 text-white shadow-lg scale-105'
                           : 'bg-white text-slate-700 border-2 border-slate-300 hover:border-blue-400'
-                      }`}
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {hours}h
                     </button>

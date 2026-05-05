@@ -50,6 +50,45 @@ const Dashboard = () => {
     { value: 'Others', label: 'Others' }
   ]
 
+  const getErrorMessage = async (response, fallbackMessage) => {
+    const responseText = await response.text()
+    if (!responseText) return fallbackMessage
+
+    try {
+      const errorData = JSON.parse(responseText)
+      return errorData.detail || errorData.message || fallbackMessage
+    } catch {
+      return responseText
+    }
+  }
+
+  const assignProgramToTrainer = async ({ trainerId, programId, scheduleDate = null }) => {
+    const token = localStorage.getItem('admin_token')
+    const normalizedScheduleDate = scheduleDate
+      ? new Date(`${scheduleDate}T00:00:00`).toISOString()
+      : null
+
+    const response = await fetch(`http://localhost:5000/api/trainers/${trainerId}/programs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        trainer_id: trainerId,
+        program_id: programId,
+        assigned_by: user?.id || 1,
+        schedule_date: normalizedScheduleDate
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(await getErrorMessage(response, 'Failed to assign program to trainer'))
+    }
+
+    return response.json()
+  }
+
   // Fetch trainers and programs for assign modal
   const fetchTrainersAndPrograms = async () => {
     try {
@@ -162,18 +201,9 @@ const Dashboard = () => {
 
       // Assign selected programs to the new trainer via the trainer_programs endpoint
       if (uniqueSelectedPrograms.length > 0 && newTrainer.id) {
-        const token = localStorage.getItem('admin_token')
-        await Promise.all(uniqueSelectedPrograms.map((programId) => fetch(`http://localhost:5000/api/trainers/${newTrainer.id}/programs`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            trainer_id: newTrainer.id,
-            program_id: Number.parseInt(programId, 10),
-            assigned_by: user?.id || 1
-          })
+        await Promise.all(uniqueSelectedPrograms.map((programId) => assignProgramToTrainer({
+          trainerId: newTrainer.id,
+          programId: Number.parseInt(programId, 10)
         })))
       }
 
@@ -202,28 +232,40 @@ const Dashboard = () => {
         throw new Error('Please select a valid trainer and program')
       }
 
+      const assignment = await assignProgramToTrainer({
+        trainerId: trainer.id,
+        programId: program.id,
+        scheduleDate: data.schedule_date || null
+      })
+
       const title = 'New Program Assignment'
       const scheduleLabel = data.schedule_date ? ` on ${data.schedule_date}` : ''
       const message = `${program.name} has been assigned to ${trainer.trainer_name || trainer.username}${scheduleLabel}.`
 
-      const response = await fetch('http://localhost:5000/api/admin/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('admin_token')}`
-        },
-        body: JSON.stringify({
-          user_id: trainer.user_id,
-          title,
-          message
+      try {
+        const notificationResponse = await fetch('http://localhost:5000/api/admin/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('admin_token')}`
+          },
+          body: JSON.stringify({
+            user_id: trainer.user_id,
+            title,
+            message
+          })
         })
-      })
 
-      if (!response.ok) throw new Error('Failed to assign program to trainer')
+        if (!notificationResponse.ok) {
+          console.error('Failed to create assignment notification')
+        }
+      } catch (notificationError) {
+        console.error('Failed to create assignment notification:', notificationError)
+      }
 
       setAssignments((prev) => [
         {
-          id: `${trainer.id}-${program.id}-${Date.now()}`,
+          id: assignment.id,
           trainerName: trainer.trainer_name || trainer.username,
           programName: program.name,
           scheduleDate: data.schedule_date || 'Not set'
@@ -234,6 +276,8 @@ const Dashboard = () => {
       setShowAssignModal(false)
       assignForm.reset()
       setSuccessMessage('Program assigned successfully!')
+      cacheManager.clearPattern('trainers:.*')
+      await fetchTrainersAndPrograms()
     } catch (err) {
       console.error('Failed to assign program:', err)
       setError(err.message)

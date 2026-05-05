@@ -143,6 +143,10 @@ class ScheduleUpdate(BaseModel):
     schedule_date: Optional[datetime] = None
     notes: Optional[str] = None
 
+
+class ScheduleHoursUpdate(BaseModel):
+    hours_per_day: int
+
 # Notification schemas
 class NotificationBase(BaseModel):
     title: str

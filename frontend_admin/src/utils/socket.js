@@ -8,7 +8,7 @@ export const getSocket = () => {
   if (!socket) {
     try {
       socket = io(SOCKET_URL, {
-        transports: ['websocket', 'polling'],
+        transports: ['polling'],
         autoConnect: true,
         reconnection: true,
         reconnectionAttempts: 5,
@@ -48,8 +48,14 @@ export const disconnectSocket = () => {
 export const registerUser = (userId) => {
   try {
     const s = getSocket()
-    if (s && s.connected && userId) {
-      s.emit('register_user', { user_id: userId })
+    if (s && userId) {
+      if (s.connected) {
+        s.emit('register_user', { user_id: userId })
+      } else {
+        s.once('connect', () => {
+          s.emit('register_user', { user_id: userId })
+        })
+      }
     }
   } catch (error) {
     console.error('Failed to register user with socket:', error)

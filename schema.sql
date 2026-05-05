@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
 );
 
 -- Create schedules table for tracking daily schedule entries
+-- Day 0 is reserved internally for assignment-level schedule settings metadata.
 CREATE TABLE IF NOT EXISTS schedules (
     id SERIAL PRIMARY KEY,
     trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,

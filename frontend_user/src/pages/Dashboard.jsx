@@ -1,23 +1,18 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import TrainerScheduleView from '../components/TrainerScheduleView'
-import { BookOpen, Clock, Zap, Award, Briefcase } from 'lucide-react'
+import { BookOpen, Clock, Zap, Award, Briefcase, Building2, Users } from 'lucide-react'
 
 const Dashboard = () => {
   const { user, loading: authLoading } = useAuth()
   const [programs, setPrograms] = useState([])
   const [selectedProgram, setSelectedProgram] = useState(null)
   const [loading, setLoading] = useState(true)
-  
 
   useEffect(() => {
-    // Wait for auth to finish loading before trying to access user.id
     if (!authLoading && user?.id) {
-      console.log('User data:', user)
-      console.log('Trainer ID:', user.id)
       fetchTrainerPrograms()
     } else if (!authLoading && !user?.id) {
-      console.log('User not authenticated or missing trainer ID')
       setLoading(false)
     }
   }, [user?.id, authLoading])
@@ -25,32 +20,29 @@ const Dashboard = () => {
   const fetchTrainerPrograms = async () => {
     try {
       setLoading(true)
-      const url = `http://localhost:5000/api/schedules/trainer/${user.id}/programs`
-      console.log('Fetching programs from:', url)
       const response = await fetch(
-        url,
+        `http://localhost:5000/api/schedules/trainer/${user.id}/programs`,
         {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }
       )
-      console.log('Response status:', response.status)
+
       if (response.ok) {
         const data = await response.json()
-        console.log('Programs fetched:', data)
         setPrograms(data)
-        if (data.length > 0) {
-          setSelectedProgram(data[0])
-        }
-      } else {
-        const errorText = await response.text()
-        console.error('Response not OK:', response.status, errorText)
+        setSelectedProgram((currentProgram) => {
+          if (!data.length) return null
+          if (!currentProgram) return data[0]
+          return data.find((program) => program.id === currentProgram.id) || data[0]
+        })
       }
-    } catch (error) {
-      console.error('Error fetching programs:', error)
+    } catch (fetchError) {
+      console.error('Error fetching programs:', fetchError)
     } finally {
       setLoading(false)
     }
   }
+
   const getTypeColor = (type) => {
     switch (type) {
       case 'Institution':
@@ -65,19 +57,27 @@ const Dashboard = () => {
   const getTypeIcon = (type) => {
     switch (type) {
       case 'Institution':
-        return '🏢'
+        return Building2
       case 'Community-Based':
-        return '👥'
+        return Users
       default:
-        return '📚'
+        return BookOpen
     }
   }
 
-  const getTotalHours = () => {
-    return programs.reduce((sum, p) => sum + (p.program_days * 8), 0)
+  const getTotalHours = () => programs.reduce((sum, program) => (
+    sum + (program.program_total_hours || ((program.program_days || 0) * (program.hours_per_day || 8)))
+  ), 0)
+
+  const handleProgramUpdate = (updatedProgram) => {
+    setPrograms((prev) => prev.map((program) => (
+      program.id === updatedProgram.id ? { ...program, ...updatedProgram } : program
+    )))
+    setSelectedProgram((currentProgram) => (
+      currentProgram?.id === updatedProgram.id ? { ...currentProgram, ...updatedProgram } : currentProgram
+    ))
   }
 
-  // Show auth loading state
   if (authLoading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -86,7 +86,6 @@ const Dashboard = () => {
     )
   }
 
-  // Show not authenticated message
   if (!user?.id) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -95,7 +94,6 @@ const Dashboard = () => {
     )
   }
 
-  // Show loading spinner
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -104,10 +102,8 @@ const Dashboard = () => {
     )
   }
 
-  // Main dashboard content
   return (
     <div className="space-y-6">
-      {/* Welcome Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">
           Welcome, {user?.trainer_name || user?.username || 'Trainer'}
@@ -117,10 +113,8 @@ const Dashboard = () => {
         </p>
       </div>
 
-      {/* Profile Card */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg shadow-md p-6 text-white">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Name Section (display only) */}
           <div>
             <p className="text-blue-100 text-sm mb-2">Full Name</p>
             <div>
@@ -128,7 +122,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Credentials Section */}
           <div className="space-y-3">
             {user?.tm_number && (
               <div className="flex items-start gap-3">
@@ -161,8 +154,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
           <div className="flex items-center">
@@ -171,12 +162,8 @@ const Dashboard = () => {
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">
-                  Assigned Programs
-                </dt>
-                <dd className="text-lg font-bold text-gray-900">
-                  {programs.length}
-                </dd>
+                <dt className="text-sm font-medium text-gray-500 truncate">Assigned Programs</dt>
+                <dd className="text-lg font-bold text-gray-900">{programs.length}</dd>
               </dl>
             </div>
           </div>
@@ -189,11 +176,9 @@ const Dashboard = () => {
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">
-                  Total Days
-                </dt>
+                <dt className="text-sm font-medium text-gray-500 truncate">Total Days</dt>
                 <dd className="text-lg font-bold text-gray-900">
-                  {programs.reduce((sum, p) => sum + (p.program_days || 0), 0)}
+                  {programs.reduce((sum, program) => sum + (program.program_days || 0), 0)}
                 </dd>
               </dl>
             </div>
@@ -207,19 +192,14 @@ const Dashboard = () => {
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">
-                  Total Hours
-                </dt>
-                <dd className="text-lg font-bold text-gray-900">
-                  {getTotalHours()}h
-                </dd>
+                <dt className="text-sm font-medium text-gray-500 truncate">Total Hours</dt>
+                <dd className="text-lg font-bold text-gray-900">{getTotalHours()}h</dd>
               </dl>
             </div>
           </div>
         </div>
       </div>
 
-      {/* No programs assigned */}
       {programs.length === 0 && (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -228,10 +208,8 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Programs list and schedule view */}
       {programs.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Programs List */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
@@ -239,44 +217,50 @@ const Dashboard = () => {
                 Your Programs
               </h3>
               <div className="space-y-2">
-                {programs.map((program) => (
-                  <button
-                    key={program.id}
-                    onClick={() => setSelectedProgram(program)}
-                    className={`w-full text-left p-4 rounded-lg transition-all border-2 ${
-                      selectedProgram?.id === program.id
-                        ? 'bg-blue-50 border-blue-500 shadow-md'
-                        : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-bold text-gray-900 text-sm">{program.program_name}</p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          {program.program_days} days
-                        </p>
+                {programs.map((program) => {
+                  const TypeIcon = getTypeIcon(program.program_type)
+
+                  return (
+                    <button
+                      key={program.id}
+                      onClick={() => setSelectedProgram(program)}
+                      className={`w-full text-left p-4 rounded-lg transition-all border-2 ${
+                        selectedProgram?.id === program.id
+                          ? 'bg-blue-50 border-blue-500 shadow-md'
+                          : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-900 text-sm">{program.program_name}</p>
+                          <p className="text-xs text-gray-600 mt-1">{program.program_days} days</p>
+                          <p className="text-xs text-gray-500 mt-1">{program.program_schedule}</p>
+                        </div>
+                        <TypeIcon className="h-5 w-5 text-gray-500 flex-shrink-0" />
                       </div>
-                      <span className="text-xl">{getTypeIcon(program.program_type)}</span>
-                    </div>
-                    <div className="mt-2">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${getTypeColor(
-                          program.program_type
-                        )}`}
-                      >
-                        {program.program_type}
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                      <div className="mt-2">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${getTypeColor(
+                            program.program_type
+                          )}`}
+                        >
+                          {program.program_type}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           </div>
 
-          {/* Schedule View */}
           <div className="lg:col-span-3">
             {selectedProgram && (
-              <TrainerScheduleView program={selectedProgram} trainerId={user.id} />
+              <TrainerScheduleView
+                program={selectedProgram}
+                trainerId={user.id}
+                onProgramUpdate={handleProgramUpdate}
+              />
             )}
           </div>
         </div>
@@ -286,4 +270,3 @@ const Dashboard = () => {
 }
 
 export default Dashboard
-

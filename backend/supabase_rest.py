@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -18,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+RETRIABLE_METHODS = {"GET", "PATCH", "DELETE"}
+MAX_REQUEST_RETRIES = 2
+RETRY_DELAY_SECONDS = 0.35
 
 
 class SupabaseAPIError(Exception):
@@ -56,6 +60,7 @@ def _build_headers(prefer: Optional[list[str]] = None, extra_headers: Optional[d
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
         "Content-Type": "application/json",
+        "Connection": "close",
     }
 
     if prefer:
@@ -78,40 +83,68 @@ def supabase_request(
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise SupabaseAPIError(500, "Supabase environment variables are not configured.")
 
-    url = _build_url(path, params)
-    body = None if payload is None else json.dumps(_serialize(payload)).encode("utf-8")
-    request = Request(
-        url,
-        data=body,
-        headers=_build_headers(prefer=prefer, extra_headers=headers),
-        method=method.upper(),
-    )
+    request_method = method.upper()
 
-    try:
-        with urlopen(request, timeout=30) as response:
-            raw_body = response.read().decode("utf-8")
-            parsed_body = json.loads(raw_body) if raw_body else None
-            return parsed_body, response.headers
-    except HTTPError as exc:
-        raw_body = exc.read().decode("utf-8", errors="replace")
-        parsed_body = None
-        try:
-            parsed_body = json.loads(raw_body) if raw_body else None
-        except json.JSONDecodeError:
-            parsed_body = None
-
-        message = (
-            (parsed_body or {}).get("message")
-            or (parsed_body or {}).get("error_description")
-            or (parsed_body or {}).get("hint")
-            or raw_body
-            or "Supabase request failed."
+    for attempt in range(MAX_REQUEST_RETRIES + 1):
+        url = _build_url(path, params)
+        body = None if payload is None else json.dumps(_serialize(payload)).encode("utf-8")
+        request = Request(
+            url,
+            data=body,
+            headers=_build_headers(prefer=prefer, extra_headers=headers),
+            method=request_method,
         )
-        logger.error("Supabase request failed: %s %s -> %s", method.upper(), path, message)
-        raise SupabaseAPIError(exc.code, message, parsed_body) from exc
-    except URLError as exc:
-        logger.error("Supabase network error: %s", exc.reason)
-        raise SupabaseAPIError(503, f"Failed to reach Supabase: {exc.reason}") from exc
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                raw_body = response.read().decode("utf-8")
+                parsed_body = json.loads(raw_body) if raw_body else None
+                return parsed_body, response.headers
+        except HTTPError as exc:
+            raw_body = exc.read().decode("utf-8", errors="replace")
+            parsed_body = None
+            try:
+                parsed_body = json.loads(raw_body) if raw_body else None
+            except json.JSONDecodeError:
+                parsed_body = None
+
+            message = (
+                (parsed_body or {}).get("message")
+                or (parsed_body or {}).get("error_description")
+                or (parsed_body or {}).get("hint")
+                or raw_body
+                or "Supabase request failed."
+            )
+
+            if (
+                request_method in RETRIABLE_METHODS
+                and exc.code >= 500
+                and attempt < MAX_REQUEST_RETRIES
+            ):
+                logger.warning(
+                    "Retrying Supabase request after HTTP %s: %s %s",
+                    exc.code,
+                    request_method,
+                    path,
+                )
+                time.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                continue
+
+            logger.error("Supabase request failed: %s %s -> %s", request_method, path, message)
+            raise SupabaseAPIError(exc.code, message, parsed_body) from exc
+        except URLError as exc:
+            if request_method in RETRIABLE_METHODS and attempt < MAX_REQUEST_RETRIES:
+                logger.warning(
+                    "Retrying Supabase network request after error %s: %s %s",
+                    exc.reason,
+                    request_method,
+                    path,
+                )
+                time.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                continue
+
+            logger.error("Supabase network error: %s", exc.reason)
+            raise SupabaseAPIError(503, f"Failed to reach Supabase: {exc.reason}") from exc
 
 
 def select_rows(
@@ -168,6 +201,17 @@ def update_row(table: str, payload: dict[str, Any], *, filters: dict[str, Any]):
     if isinstance(data, list):
         return data[0] if data else None
     return data
+
+
+def update_rows(table: str, payload: dict[str, Any], *, filters: dict[str, Any]):
+    data, _ = supabase_request(
+        "PATCH",
+        f"/rest/v1/{table}",
+        params=filters,
+        payload=payload,
+        prefer=["return=representation"],
+    )
+    return data or []
 
 
 def delete_rows(table: str, *, filters: dict[str, Any], returning: str = "representation"):
