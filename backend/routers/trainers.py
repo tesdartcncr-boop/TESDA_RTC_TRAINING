@@ -12,6 +12,7 @@ router = APIRouter()
 
 ADMIN_ACCESS_DENIED = "Access denied. Admin access required."
 TRAINER_NOT_FOUND = "Trainer not found"
+TRAINERS_CACHE_PATTERN = "trainers:*"
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
@@ -20,13 +21,13 @@ def raise_supabase_http(exc: SupabaseAPIError):
     raise HTTPException(status_code=status_code, detail=exc.message) from exc
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("/")
 async def get_trainers(
     current_user: CurrentUser,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
-    search: str = Query(None)
-):
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    search: Annotated[str, Query()] = None
+) -> Dict[str, Any]:
     """Get paginated trainers with optional search and caching"""
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
@@ -68,8 +69,15 @@ async def get_trainers(
         raise_supabase_http(exc)
 
 
-@router.post("/", response_model=TrainerResponse)
-async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser):
+@router.post("/")
+async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser) -> TrainerResponse:
+    """Create a new trainer account
+    
+    Raises:
+        HTTPException: status_code=403 if user is not admin
+        HTTPException: status_code=400 if username already exists
+        HTTPException: status_code=500 if database operation fails
+    """
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
@@ -114,7 +122,7 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
                 },
             )
             # Invalidate cache
-            cache_manager.clear_pattern("trainers:*")
+            cache_manager.clear_pattern(TRAINERS_CACHE_PATTERN)
             await broadcast_trainer_update(trainer)
             return trainer
         except SupabaseAPIError:
@@ -128,8 +136,15 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
         raise_supabase_http(exc)
 
 
-@router.get("/{trainer_id}", response_model=TrainerResponse)
-async def get_trainer(trainer_id: int, current_user: CurrentUser):
+@router.get("/{trainer_id}")
+async def get_trainer(trainer_id: int, current_user: CurrentUser) -> TrainerResponse:
+    """Get a specific trainer by ID
+    
+    Raises:
+        HTTPException: status_code=403 if user is not admin
+        HTTPException: status_code=404 if trainer not found
+        HTTPException: status_code=500 if database operation fails
+    """
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
@@ -143,8 +158,15 @@ async def get_trainer(trainer_id: int, current_user: CurrentUser):
     return trainer
 
 
-@router.put("/{trainer_id}", response_model=TrainerResponse)
-async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_user: CurrentUser):
+@router.put("/{trainer_id}")
+async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_user: CurrentUser) -> TrainerResponse:
+    """Update a specific trainer's information
+    
+    Raises:
+        HTTPException: status_code=403 if user is not admin or not the trainer being updated
+        HTTPException: status_code=404 if trainer not found
+        HTTPException: status_code=500 if database operation fails
+    """
     try:
         trainer = select_one("trainers", filters={"id": f"eq.{trainer_id}"})
     except SupabaseAPIError as exc:
@@ -163,15 +185,41 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
     try:
         updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer_id}"})
         # Invalidate cache
-        cache_manager.clear_pattern("trainers:*")
+        cache_manager.clear_pattern(TRAINERS_CACHE_PATTERN)
         await broadcast_trainer_update(updated_trainer or trainer)
         return updated_trainer or trainer
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
 
-@router.put("/profile", response_model=TrainerResponse)
-async def update_trainer_profile(trainer_data: TrainerUpdate, current_user: CurrentUser):
+def _prepare_user_updates(update_data: Dict[str, Any], trainer: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract and prepare user_updates from trainer_data"""
+    user_updates = {}
+    
+    if 'username' in update_data and update_data['username']:
+        new_username = update_data.pop('username')
+        existing_user = select_one('users', filters={"username": f"eq.{new_username}"}, select='id')
+        if existing_user and int(existing_user.get('id')) != int(trainer.get('user_id')):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Username already exists')
+        user_updates['username'] = new_username
+    
+    if 'password' in update_data and update_data['password']:
+        new_password = update_data.pop('password')
+        user_updates['password_hash'] = get_password_hash(new_password)
+    
+    return user_updates
+
+
+@router.put("/me/profile")
+async def update_trainer_profile(trainer_data: TrainerUpdate, current_user: CurrentUser) -> TrainerResponse:
+    """Update the current trainer's profile
+    
+    Raises:
+        HTTPException: status_code=403 if user is not a trainer
+        HTTPException: status_code=404 if trainer profile not found
+        HTTPException: status_code=400 if username already exists
+        HTTPException: status_code=500 if database operation fails
+    """
     if current_user.get("user_type") != "trainer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -190,12 +238,26 @@ async def update_trainer_profile(trainer_data: TrainerUpdate, current_user: Curr
         )
 
     update_data = trainer_data.dict(exclude_unset=True)
+    
     try:
-        updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer['id']}"})
+        # Handle username/password updates in users table if provided
+        user_updates = _prepare_user_updates(update_data, trainer)
+        
+        if user_updates:
+            update_row('users', user_updates, filters={"id": f"eq.{trainer['user_id']}"})
+
+        # Update trainers table with remaining fields (trainer_name, qualifications, tm_*, nttc_*)
+        if update_data:
+            updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer['id']}"})
+        else:
+            updated_trainer = select_one('trainers', filters={"id": f"eq.{trainer['id']}"})
+        
+        # Invalidate cache and broadcast
+        cache_manager.clear_pattern(TRAINERS_CACHE_PATTERN)
+        await broadcast_trainer_update(updated_trainer or trainer)
+        return updated_trainer or trainer
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
-
-    return updated_trainer or trainer
 
 
 @router.delete("/{trainer_id}")

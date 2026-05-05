@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import TrainerScheduleView from '../components/TrainerScheduleView'
-import { BookOpen, Clock, Zap } from 'lucide-react'
+import { BookOpen, Clock, Zap, Award, Briefcase } from 'lucide-react'
 
 const Dashboard = () => {
   const { user, loading: authLoading } = useAuth()
   const [programs, setPrograms] = useState([])
   const [selectedProgram, setSelectedProgram] = useState(null)
   const [loading, setLoading] = useState(true)
+  
 
   useEffect(() => {
     // Wait for auth to finish loading before trying to access user.id
@@ -50,15 +51,25 @@ const Dashboard = () => {
       setLoading(false)
     }
   }
-
   const getTypeColor = (type) => {
     switch (type) {
       case 'Institution':
-        return 'bg-blue-100 text-blue-800'
+        return 'bg-blue-100 text-blue-800 border border-blue-300'
       case 'Community-Based':
-        return 'bg-green-100 text-green-800'
+        return 'bg-green-100 text-green-800 border border-green-300'
       default:
-        return 'bg-gray-100 text-gray-800'
+        return 'bg-gray-100 text-gray-800 border border-gray-300'
+    }
+  }
+
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'Institution':
+        return '🏢'
+      case 'Community-Based':
+        return '👥'
+      default:
+        return '📚'
     }
   }
 
@@ -106,19 +117,64 @@ const Dashboard = () => {
         </p>
       </div>
 
+      {/* Profile Card */}
+      <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg shadow-md p-6 text-white">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Name Section (display only) */}
+          <div>
+            <p className="text-blue-100 text-sm mb-2">Full Name</p>
+            <div>
+              <h2 className="text-2xl font-bold">{user?.trainer_name || user?.username || 'Trainer'}</h2>
+            </div>
+          </div>
+
+          {/* Credentials Section */}
+          <div className="space-y-3">
+            {user?.tm_number && (
+              <div className="flex items-start gap-3">
+                <Award className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-blue-100 text-sm">TM Number</p>
+                  <p className="font-semibold">{user.tm_number}</p>
+                  {user?.tm_expiration && (
+                    <p className="text-xs text-blue-100">Expires: {new Date(user.tm_expiration).toLocaleDateString()}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {user?.nttc_number && (
+              <div className="flex items-start gap-3">
+                <Briefcase className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-blue-100 text-sm">NTTC Number</p>
+                  <p className="font-semibold">{user.nttc_number}</p>
+                  {user?.nttc_expiration && (
+                    <p className="text-xs text-blue-100">Expires: {new Date(user.nttc_expiration).toLocaleDateString()}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {!user?.tm_number && !user?.nttc_number && (
+              <p className="text-blue-100 text-sm italic">No certifications on file</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-        <div className="card">
+        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
           <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-blue-500">
-              <BookOpen className="h-6 w-6 text-white" />
+            <div className="flex-shrink-0 p-3 rounded-md bg-blue-100">
+              <BookOpen className="h-6 w-6 text-blue-600" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
                   Assigned Programs
                 </dt>
-                <dd className="text-lg font-semibold text-gray-900">
+                <dd className="text-lg font-bold text-gray-900">
                   {programs.length}
                 </dd>
               </dl>
@@ -126,17 +182,17 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="card">
+        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
           <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-green-500">
-              <Clock className="h-6 w-6 text-white" />
+            <div className="flex-shrink-0 p-3 rounded-md bg-green-100">
+              <Clock className="h-6 w-6 text-green-600" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
                   Total Days
                 </dt>
-                <dd className="text-lg font-semibold text-gray-900">
+                <dd className="text-lg font-bold text-gray-900">
                   {programs.reduce((sum, p) => sum + (p.program_days || 0), 0)}
                 </dd>
               </dl>
@@ -144,17 +200,17 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="card">
+        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
           <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-purple-500">
-              <Zap className="h-6 w-6 text-white" />
+            <div className="flex-shrink-0 p-3 rounded-md bg-purple-100">
+              <Zap className="h-6 w-6 text-purple-600" />
             </div>
             <div className="ml-5 w-0 flex-1">
               <dl>
                 <dt className="text-sm font-medium text-gray-500 truncate">
                   Total Hours
                 </dt>
-                <dd className="text-lg font-semibold text-gray-900">
+                <dd className="text-lg font-bold text-gray-900">
                   {getTotalHours()}h
                 </dd>
               </dl>
@@ -165,7 +221,7 @@ const Dashboard = () => {
 
       {/* No programs assigned */}
       {programs.length === 0 && (
-        <div className="card text-center p-12">
+        <div className="bg-white rounded-lg shadow p-12 text-center">
           <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Programs Assigned</h3>
           <p className="text-gray-600">You currently have no training programs assigned to you.</p>
@@ -177,29 +233,39 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Programs List */}
           <div className="lg:col-span-1">
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Your Programs</h3>
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                <BookOpen className="h-5 w-5 mr-2 text-blue-600" />
+                Your Programs
+              </h3>
               <div className="space-y-2">
                 {programs.map((program) => (
                   <button
                     key={program.id}
                     onClick={() => setSelectedProgram(program)}
-                    className={`w-full text-left p-3 rounded-lg transition-all ${
+                    className={`w-full text-left p-4 rounded-lg transition-all border-2 ${
                       selectedProgram?.id === program.id
-                        ? 'bg-blue-50 border-2 border-blue-500'
-                        : 'border-2 border-gray-200 hover:border-gray-300'
+                        ? 'bg-blue-50 border-blue-500 shadow-md'
+                        : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                     }`}
                   >
-                    <p className="font-medium text-gray-900 text-sm">{program.program_name}</p>
-                    <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-bold text-gray-900 text-sm">{program.program_name}</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {program.program_days} days
+                        </p>
+                      </div>
+                      <span className="text-xl">{getTypeIcon(program.program_type)}</span>
+                    </div>
+                    <div className="mt-2">
                       <span
-                        className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getTypeColor(
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${getTypeColor(
                           program.program_type
                         )}`}
                       >
                         {program.program_type}
                       </span>
-                      <span className="text-xs text-gray-600">{program.program_days}d</span>
                     </div>
                   </button>
                 ))}

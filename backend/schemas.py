@@ -52,6 +52,8 @@ class TrainerCreate(BaseModel):
     nttc_expiration: Optional[datetime] = None
 
 class TrainerUpdate(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
     qualifications: Optional[str] = None
     trainer_name: Optional[str] = None
     tm_number: Optional[str] = None

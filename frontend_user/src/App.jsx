@@ -4,7 +4,6 @@ import { useAuth } from './contexts/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
-import Programs from './pages/Programs'
 import Layout from './components/Layout'
 
 function App() {
@@ -20,27 +19,16 @@ function App() {
 
   return (
     <Routes>
-      <Route 
-        path="/login" 
-        element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} 
-      />
       <Route
-        path="/*"
-        element={
-          isAuthenticated ? (
-            <Layout>
-              <Routes>
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/profile" element={<Profile />} />
-                <Route path="/programs" element={<Programs />} />
-                <Route path="/" element={<Navigate to="/dashboard" />} />
-              </Routes>
-            </Layout>
-          ) : (
-            <Navigate to="/login" />
-          )
-        }
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
       />
+      <Route element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Route>
     </Routes>
   )
 }

@@ -70,6 +70,31 @@ async def broadcast_program_update(program_data):
     await sio.emit("program_update", program_data)
 
 
+async def broadcast_schedule_update(schedule_data):
+    try:
+        # Broadcast schedule updates to all connected admin users
+        admin_users = select_rows(
+            "users",
+            filters={
+                "user_type": "eq.admin",
+                "is_active": "eq.true",
+            },
+            select="id",
+        )
+    except SupabaseAPIError as exc:
+        logger.error("Failed to load admin users for schedule broadcast: %s", exc.message)
+        return
+
+    admin_ids = {admin["id"] for admin in admin_users}
+    for sid, registered_user_id in connected_users.items():
+        try:
+            if int(registered_user_id) in admin_ids:
+                await sio.emit("schedule_update", schedule_data, room=sid)
+        except Exception:
+            # ignore
+            pass
+
+
 async def broadcast_trainer_update(trainer_data):
     try:
         admin_users = select_rows(

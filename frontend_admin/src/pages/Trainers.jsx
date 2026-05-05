@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import PropTypes from 'prop-types'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Users, UserPlus, Search, Edit, Trash2, Download, Award, BookOpen, Plus, Loader, AlertCircle, X } from 'lucide-react'
@@ -47,6 +48,10 @@ const Trainers = () => {
       if (res.ok) { const data = await res.json(); return data.data || [] }
       return []
     } catch (e) { console.error(e); return [] }
+  }, [])
+
+  const handleRemoveEditProgram = useCallback((programId) => {
+    setSelectedEditPrograms((current) => current.filter((pid) => pid !== programId))
   }, [])
 
   const fetchTrainers = useCallback(async (currentSkip = 0, append = false) => {
@@ -285,22 +290,50 @@ const Trainers = () => {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-2xl w-full p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-gray-900">Create New Trainer</h3><button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button></div>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black flex items-center justify-center p-4">
+          <div className="relative max-w-2xl w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-gray-900">Create New Trainer</h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-6 w-6" />
+              </button>
+            </div>
             <form onSubmit={handleSubmit(onCreateTrainer)} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">Username *</label><input {...register('username', { required: 'Required' })} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter username" />{errors.username && <p className="mt-2 text-sm font-semibold text-red-600">{errors.username.message}</p>}</div>
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">Password *</label><input {...register('password', { required: 'Required' })} type="password" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter password" />{errors.password && <p className="mt-2 text-sm font-semibold text-red-600">{errors.password.message}</p>}</div>
+                <div>
+                  <label htmlFor="create_username" className="block text-sm font-semibold text-gray-700 mb-2">Username *</label>
+                  <input id="create_username" {...register('username', { required: 'Required' })} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter username" />
+                  {errors.username && <p className="mt-2 text-sm font-semibold text-red-600">{errors.username.message}</p>}
+                </div>
+                <div>
+                  <label htmlFor="create_password" className="block text-sm font-semibold text-gray-700 mb-2">Password *</label>
+                  <input id="create_password" {...register('password', { required: 'Required' })} type="password" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter password" />
+                  {errors.password && <p className="mt-2 text-sm font-semibold text-red-600">{errors.password.message}</p>}
+                </div>
               </div>
-              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Trainer Name</label><input {...register('trainer_name')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter trainer name (optional)" /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">TM Number</label><input {...register('tm_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="TM number (optional)" /></div>
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">TM Expiration</label><input {...register('tm_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+              <div>
+                <label htmlFor="create_trainer_name" className="block text-sm font-semibold text-gray-700 mb-2">Trainer Name</label>
+                <input id="create_trainer_name" {...register('trainer_name')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter trainer name (optional)" />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">NTTC Number</label><input {...register('nttc_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="NTTC number (optional)" /></div>
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">NTTC Expiration</label><input {...register('nttc_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+                <div>
+                  <label htmlFor="create_tm_number" className="block text-sm font-semibold text-gray-700 mb-2">TM Number</label>
+                  <input id="create_tm_number" {...register('tm_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="TM number (optional)" />
+                </div>
+                <div>
+                  <label htmlFor="create_tm_expiration" className="block text-sm font-semibold text-gray-700 mb-2">TM Expiration</label>
+                  <input id="create_tm_expiration" {...register('tm_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="create_nttc_number" className="block text-sm font-semibold text-gray-700 mb-2">NTTC Number</label>
+                  <input id="create_nttc_number" {...register('nttc_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="NTTC number (optional)" />
+                </div>
+                <div>
+                  <label htmlFor="create_nttc_expiration" className="block text-sm font-semibold text-gray-700 mb-2">NTTC Expiration</label>
+                  <input id="create_nttc_expiration" {...register('nttc_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
+                </div>
               </div>
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                 <button type="button" onClick={() => setShowCreateModal(false)} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
@@ -313,31 +346,41 @@ const Trainers = () => {
 
       {/* Edit Modal */}
       {showEditModal && selectedTrainer && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-2xl w-full p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-gray-900">Edit Trainer</h3><button onClick={() => { setShowEditModal(false); setSelectedEditPrograms([]) }} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button></div>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black flex items-center justify-center p-4">
+          <div className="relative max-w-2xl w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-gray-900">Edit Trainer</h3>
+              <button onClick={() => { setShowEditModal(false); setSelectedEditPrograms([]) }} className="text-gray-400 hover:text-gray-600">
+                <X className="h-6 w-6" />
+              </button>
+            </div>
             <form onSubmit={handleSubmit(onUpdateTrainer)} className="space-y-4">
-              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Trainer Name</label><input {...register('trainer_name')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter trainer name" /></div>
+              <div>
+                <label htmlFor="edit_trainer_name" className="block text-sm font-semibold text-gray-700 mb-2">Trainer Name</label>
+                <input id="edit_trainer_name" {...register('trainer_name')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="Enter trainer name" />
+              </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="block text-sm font-semibold text-gray-700">Assigned Programs</span>
-                  <button type="button" onClick={() => openQuickAssignModal(selectedTrainer)} className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"><Plus className="h-3 w-3 mr-1" />Add more</button>
+                  <button type="button" onClick={() => openQuickAssignModal(selectedTrainer)} className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100">
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add more
+                  </button>
                 </div>
                 <div className="border-2 border-gray-200 rounded-lg p-4 max-h-40 overflow-y-auto">
-                  {selectedEditPrograms.length === 0 ? <p className="text-sm text-gray-500">No programs assigned</p> : (
+                  {selectedEditPrograms.length === 0 ? (
+                    <p className="text-sm text-gray-500">No programs assigned</p>
+                  ) : (
                     <div className="flex flex-wrap gap-2">
-                      {selectedEditPrograms.map((programId) => {
-                        const program = assignedProgramMap[programId]
-                        return (
-                          <span key={programId} className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                            <span>{program?.name || 'Unknown'}</span>
-                            <button type="button" onClick={() => setSelectedEditPrograms((current) => current.filter((id) => id !== programId))} className="rounded-full p-0.5 hover:bg-blue-200" aria-label={`Remove ${program?.name || 'program'}`}>
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        )
-                      })}
+                      {selectedEditPrograms.map((programId) => (
+                        <EditProgramItem
+                          key={programId}
+                          programId={programId}
+                          program={assignedProgramMap[programId]}
+                          onRemove={handleRemoveEditProgram}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -345,12 +388,24 @@ const Trainers = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">TM Number</label><input {...register('tm_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="TM number" /></div>
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">TM Expiration</label><input {...register('tm_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+                <div>
+                  <label htmlFor="edit_tm_number" className="block text-sm font-semibold text-gray-700 mb-2">TM Number</label>
+                  <input id="edit_tm_number" {...register('tm_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="TM number" />
+                </div>
+                <div>
+                  <label htmlFor="edit_tm_expiration" className="block text-sm font-semibold text-gray-700 mb-2">TM Expiration</label>
+                  <input id="edit_tm_expiration" {...register('tm_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">NTTC Number</label><input {...register('nttc_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="NTTC number" /></div>
-                <div><label className="block text-sm font-semibold text-gray-700 mb-2">NTTC Expiration</label><input {...register('nttc_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+                <div>
+                  <label htmlFor="edit_nttc_number" className="block text-sm font-semibold text-gray-700 mb-2">NTTC Number</label>
+                  <input id="edit_nttc_number" {...register('nttc_number')} className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" placeholder="NTTC number" />
+                </div>
+                <div>
+                  <label htmlFor="edit_nttc_expiration" className="block text-sm font-semibold text-gray-700 mb-2">NTTC Expiration</label>
+                  <input id="edit_nttc_expiration" {...register('nttc_expiration')} type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
+                </div>
               </div>
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                 <button type="button" onClick={() => { setShowEditModal(false); setSelectedEditPrograms([]) }} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
@@ -363,19 +418,26 @@ const Trainers = () => {
 
       {/* Quick Assign Modal */}
       {showQuickAssignModal && quickAssignTarget && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-lg w-full p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black flex items-center justify-center p-4">
+          <div className="relative max-w-lg w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">Add more programs</h3>
                 <p className="mt-1 text-sm text-gray-500">{quickAssignTarget.trainer_name || quickAssignTarget.username}</p>
               </div>
-              <button onClick={closeQuickAssignModal} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+              <button onClick={closeQuickAssignModal} className="text-gray-400 hover:text-gray-600">
+                <X className="h-6 w-6" />
+              </button>
             </div>
             <div className="space-y-4">
-              <div className="relative"><Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" /><input type="text" value={quickAssignSearchTerm} onChange={(e) => setQuickAssignSearchTerm(e.target.value)} placeholder="Search unassigned programs..." className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" /></div>
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input id="quickassign_search" type="text" value={quickAssignSearchTerm} onChange={(e) => setQuickAssignSearchTerm(e.target.value)} placeholder="Search unassigned programs..." className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
+              </div>
               <div className="border-2 border-gray-200 rounded-lg p-4 max-h-72 overflow-y-auto">
-                {quickAssignAvailablePrograms.length === 0 ? <p className="text-sm text-gray-500">No unassigned programs found</p> : (
+                {quickAssignAvailablePrograms.length === 0 ? (
+                  <p className="text-sm text-gray-500">No unassigned programs found</p>
+                ) : (
                   <div className="space-y-2">
                     {quickAssignAvailablePrograms.map((program) => {
                       const checked = quickAssignSelectedPrograms.includes(String(program.id))
@@ -389,13 +451,35 @@ const Trainers = () => {
                   </div>
                 )}
               </div>
-              <div className="flex justify-end space-x-3 pt-4"><button onClick={closeQuickAssignModal} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button><button onClick={onQuickAssign} disabled={isLoading || quickAssignSelectedPrograms.length === 0} className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50">{isLoading ? 'Assigning...' : 'Add selected'}</button></div>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button onClick={closeQuickAssignModal} className="px-6 py-3 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+                <button onClick={onQuickAssign} disabled={isLoading || quickAssignSelectedPrograms.length === 0} className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50">{isLoading ? 'Assigning...' : 'Add selected'}</button>
+              </div>
             </div>
           </div>
         </div>
       )}
     </div>
   )
+}
+
+function EditProgramItem({ programId, program, onRemove }) {
+  return (
+    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+      <span>{program?.name || 'Unknown'}</span>
+      <button type="button" onClick={() => onRemove(programId)} className="rounded-full p-0.5 hover:bg-blue-200" aria-label={`Remove ${program?.name || 'program'}`}>
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
+EditProgramItem.propTypes = {
+  programId: PropTypes.number.isRequired,
+  program: PropTypes.shape({
+    name: PropTypes.string,
+  }),
+  onRemove: PropTypes.func.isRequired,
 }
 
 function TrainerProgramsList({ trainerId, fetchTrainerPrograms }) {
@@ -412,6 +496,11 @@ function TrainerProgramsList({ trainerId, fetchTrainerPrograms }) {
       {assignments.map((a) => (<span key={a.id} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">{a.program?.name || 'Unknown'}</span>))}
     </div>
   )
+}
+
+TrainerProgramsList.propTypes = {
+  trainerId: PropTypes.number.isRequired,
+  fetchTrainerPrograms: PropTypes.func.isRequired,
 }
 
 export default Trainers

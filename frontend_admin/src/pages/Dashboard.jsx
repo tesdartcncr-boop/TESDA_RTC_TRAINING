@@ -349,7 +349,7 @@ const Dashboard = () => {
       {/* Create Program Modal */}
       {showCreateProgramModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-md w-full p-8 shadow-2xl">
+          <div className="relative max-w-md w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Create New Program</h3>
               <button
@@ -469,7 +469,7 @@ const Dashboard = () => {
       {/* Create Trainer Modal */}
       {showCreateTrainerModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-2xl w-full p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="relative max-w-2xl w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Create New Trainer</h3>
               <button
@@ -616,7 +616,7 @@ const Dashboard = () => {
       {/* Assign Program Modal */}
       {showAssignModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-xl max-w-md w-full p-8 shadow-2xl">
+          <div className="relative max-w-md w-full overflow-hidden rounded-2xl bg-white p-8 shadow-[0_25px_70px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/60">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Assign Program to Trainer</h3>
               <button

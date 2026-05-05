@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { useAuth } from '../contexts/AuthContext'
-import { User, Mail, Calendar, Award, Save, Edit2, X } from 'lucide-react'
+import { User, Award, Save, Edit2, X } from 'lucide-react'
 
 const Profile = () => {
   const { user, updateProfile } = useAuth()
@@ -12,19 +12,15 @@ const Profile = () => {
     register,
     handleSubmit,
     reset,
-    formState: { errors },
-    setValue
+    formState: { errors }
   } = useForm()
 
   useEffect(() => {
     if (user) {
       reset({
         trainer_name: user.trainer_name || '',
-        qualifications: user.qualifications || '',
-        tm_number: user.tm_number || '',
-        tm_expiration: user.tm_expiration ? new Date(user.tm_expiration).toISOString().split('T')[0] : '',
-        nttc_number: user.nttc_number || '',
-        nttc_expiration: user.nttc_expiration ? new Date(user.nttc_expiration).toISOString().split('T')[0] : ''
+        username: user.username || '',
+        password: ''
       })
     }
   }, [user, reset])
@@ -32,7 +28,14 @@ const Profile = () => {
   const onSubmit = async (data) => {
     setIsLoading(true)
     try {
-      const result = await updateProfile(data)
+      // Only allow updating trainer_name, username and password from trainer portal
+      const payload = {
+        trainer_name: data.trainer_name,
+        username: data.username
+      }
+      if (data.password && data.password.trim() !== '') payload.password = data.password
+
+      const result = await updateProfile(payload)
       if (result.success) {
         setIsEditing(false)
       }
@@ -77,15 +80,7 @@ const Profile = () => {
               <p className="text-sm text-gray-500">Trainer Account</p>
             </div>
           </div>
-          {!isEditing ? (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="flex items-center px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800"
-            >
-              <Edit2 className="h-4 w-4 mr-2" />
-              Edit Profile
-            </button>
-          ) : (
+          {isEditing ? (
             <div className="flex space-x-2">
               <button
                 onClick={handleCancel}
@@ -103,60 +98,69 @@ const Profile = () => {
                 {isLoading ? 'Saving...' : 'Save'}
               </button>
             </div>
+          ) : (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="flex items-center px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              <Edit2 className="h-4 w-4 mr-2" />
+              Edit Profile
+            </button>
           )}
         </div>
 
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           {/* Basic Information */}
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-gray-900 flex items-center">
-              <User className="h-5 w-5 mr-2 text-gray-400" />
-              Basic Information
-            </h3>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Trainer Name
-              </label>
-              {isEditing ? (
-                <input
-                  {...register('trainer_name', { required: 'Trainer name is required' })}
-                  className="input-field"
-                  placeholder="Enter trainer name"
-                />
-              ) : (
-                <p className="text-gray-900">{user?.trainer_name || 'Not set'}</p>
-              )}
-              {errors.trainer_name && (
-                <p className="mt-1 text-sm text-red-600">{errors.trainer_name.message}</p>
-              )}
-            </div>
+                <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                  <User className="h-5 w-5 mr-2 text-gray-400" />
+                  Account
+                </h3>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username
-              </label>
-              <p className="text-gray-900">{user?.username}</p>
-              <p className="text-xs text-gray-500 mt-1">Username cannot be changed</p>
-            </div>
+                <div>
+                  <label htmlFor="trainer_name" className="block text-sm font-medium text-gray-700 mb-1">Trainer Name</label>
+                  {isEditing ? (
+                    <input
+                      id="trainer_name"
+                      {...register('trainer_name', { required: 'Trainer name is required' })}
+                      className="input-field"
+                      placeholder="Enter trainer name"
+                    />
+                  ) : (
+                    <p className="text-gray-900">{user?.trainer_name || 'Not set'}</p>
+                  )}
+                  {errors.trainer_name && <p className="mt-1 text-sm text-red-600">{errors.trainer_name.message}</p>}
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Qualifications
-              </label>
-              {isEditing ? (
-                <textarea
-                  {...register('qualifications')}
-                  rows={3}
-                  className="input-field"
-                  placeholder="Enter your qualifications"
-                />
-              ) : (
-                <p className="text-gray-900 whitespace-pre-wrap">
-                  {user?.qualifications || 'No qualifications added'}
-                </p>
-              )}
-            </div>
+                <div>
+                  <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  {isEditing ? (
+                    <input
+                      id="username"
+                      {...register('username', { required: 'Username is required' })}
+                      className="input-field"
+                      placeholder="Enter username"
+                    />
+                  ) : (
+                    <p className="text-gray-900">{user?.username}</p>
+                  )}
+                  {errors.username && <p className="mt-1 text-sm text-red-600">{errors.username.message}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  {isEditing ? (
+                    <input
+                      id="password"
+                      {...register('password')}
+                      type="password"
+                      className="input-field"
+                      placeholder="Leave blank to keep current password"
+                    />
+                  ) : (
+                    <p className="text-gray-900">••••••••</p>
+                  )}
+                </div>
           </div>
 
           {/* Certifications */}
@@ -167,63 +171,23 @@ const Profile = () => {
             </h3>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                TM Number
-              </label>
-              {isEditing ? (
-                <input
-                  {...register('tm_number')}
-                  className="input-field"
-                  placeholder="Enter TM number"
-                />
-              ) : (
-                <p className="text-gray-900">{user?.tm_number || 'Not set'}</p>
-              )}
+              <div className="text-sm font-medium text-gray-700 mb-1">TM Number</div>
+              <p className="text-gray-900">{user?.tm_number || 'Not set'}</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                TM Expiration Date
-              </label>
-              {isEditing ? (
-                <input
-                  {...register('tm_expiration')}
-                  type="date"
-                  className="input-field"
-                />
-              ) : (
-                <p className="text-gray-900">{formatDate(user?.tm_expiration)}</p>
-              )}
+              <div className="text-sm font-medium text-gray-700 mb-1">TM Expiration Date</div>
+              <p className="text-gray-900">{formatDate(user?.tm_expiration)}</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                NTTC Number
-              </label>
-              {isEditing ? (
-                <input
-                  {...register('nttc_number')}
-                  className="input-field"
-                  placeholder="Enter NTTC number"
-                />
-              ) : (
-                <p className="text-gray-900">{user?.nttc_number || 'Not set'}</p>
-              )}
+              <div className="text-sm font-medium text-gray-700 mb-1">NTTC Number</div>
+              <p className="text-gray-900">{user?.nttc_number || 'Not set'}</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                NTTC Expiration Date
-              </label>
-              {isEditing ? (
-                <input
-                  {...register('nttc_expiration')}
-                  type="date"
-                  className="input-field"
-                />
-              ) : (
-                <p className="text-gray-900">{formatDate(user?.nttc_expiration)}</p>
-              )}
+              <div className="text-sm font-medium text-gray-700 mb-1">NTTC Expiration Date</div>
+              <p className="text-gray-900">{formatDate(user?.nttc_expiration)}</p>
             </div>
           </div>
         </div>

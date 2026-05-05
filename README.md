@@ -277,7 +277,7 @@ Additional trainer accounts: `trainer2` through `trainer10` with same password.
 - `GET /api/trainers/{id}` - Get trainer details
 - `PUT /api/trainers/{id}` - Update trainer
 - `DELETE /api/trainers/{id}` - Deactivate trainer
-- `PUT /api/trainers/profile` - Update own profile (trainers)
+- `PUT /api/trainers/me/profile` - Update own profile (trainers)
 
 ### Programs
 - `GET /api/programs/` - List all programs

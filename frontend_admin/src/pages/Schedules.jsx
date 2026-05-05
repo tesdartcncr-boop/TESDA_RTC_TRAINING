@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react'
+import { getSocket } from '../utils/socket'
 import { AlertCircle, Search, Filter, ChevronDown, Trash2 } from 'lucide-react'
 
 const STATUS_COLORS = {
@@ -64,6 +65,30 @@ export default function Schedules() {
   useEffect(() => {
     fetchTrainers()
   }, [fetchTrainers])
+
+  // Listen for schedule updates from server and apply to UI in real-time
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return
+
+    const handleScheduleUpdate = (payload) => {
+      try {
+        if (!payload) return
+        const { trainer_id, program_id, day_number, data } = payload
+        if (!selectedTrainer || !selectedProgram) return
+        if (trainer_id === selectedTrainer.id && program_id === selectedProgram.program_id) {
+          setScheduleData((prev) => ({ ...prev, [day_number]: data }))
+        }
+      } catch (e) {
+        console.error('Error handling schedule_update payload', e)
+      }
+    }
+
+    socket.on('schedule_update', handleScheduleUpdate)
+    return () => {
+      socket.off('schedule_update', handleScheduleUpdate)
+    }
+  }, [selectedTrainer, selectedProgram])
 
   const handleTrainerClick = async (trainer) => {
     try {
@@ -527,34 +552,53 @@ export default function Schedules() {
             </div>
           </div>
 
-          {/* Status Menu */}
+          {/* Status Modal */}
           {showStatusMenu && selectedCell && (
-            <div className="bg-slate-50 rounded-lg p-6 border-2 border-blue-400 mb-6">
-              <p className="text-sm font-bold text-slate-700 mb-4">Day {selectedCell} - Select Status:</p>
-              <div className="flex flex-wrap gap-3">
-                {Object.entries(STATUS_COLORS).map(([status, config]) => (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusChange(status)}
-                    disabled={isSaving}
-                    className={`px-5 py-3 rounded-lg text-white font-bold transition-all ${config.bg} hover:shadow-lg disabled:opacity-50 flex items-center gap-2`}
-                  >
-                    <span className="text-lg">{config.shortLabel}</span>
-                    {config.label}
-                  </button>
-                ))}
-                <button
-                  onClick={() => {
-                    setShowStatusMenu(false)
-                    setSelectedCell(null)
-                  }}
-                  className="px-5 py-3 rounded-lg bg-slate-400 text-white font-bold hover:bg-slate-500 transition-colors ml-auto"
-                >
-                  Cancel
-                </button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black opacity-40"
+              onClick={() => { setShowStatusMenu(false); setSelectedCell(null) }}
+              aria-label="Close status menu"
+            />
+                <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl z-60">
+                  <div className="flex items-start justify-between mb-3">
+                    <p className="text-lg font-bold text-slate-700">Day {selectedCell} — Select Status</p>
+                    <button onClick={() => { setShowStatusMenu(false); setSelectedCell(null) }} className="text-slate-500 hover:text-slate-700">✕</button>
+                  </div>
+
+                  <p className="text-sm text-slate-600 mb-4">Choose a status. Clicking the same status again clears it.</p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                    {Object.entries(STATUS_COLORS).map(([status, config]) => (
+                      <button
+                        key={status}
+                        onClick={() => handleStatusChange(status)}
+                        disabled={isSaving}
+                        className={`flex items-center justify-center gap-3 px-4 py-3 rounded-full text-white font-semibold transition transform hover:-translate-y-0.5 ${config.bg} hover:brightness-105 disabled:opacity-50`}
+                        style={{ minWidth: 120 }}
+                      >
+                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/25 text-sm font-bold">{config.shortLabel}</span>
+                        <span className="whitespace-nowrap">{config.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => {
+                        setShowStatusMenu(false)
+                        setSelectedCell(null)
+                      }}
+                      className="px-4 py-2 rounded-full bg-slate-100 text-slate-700 font-medium hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-slate-500 mt-3 italic">Click same status again to clear it</p>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-3 italic">Click same status again to clear it</p>
-            </div>
           )}
         </div>
 

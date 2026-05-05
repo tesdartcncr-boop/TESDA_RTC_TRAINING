@@ -88,7 +88,7 @@ function useProgramSearch() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [searchTerm])
+  }, [searchTerm, isOpen])
 
   useEffect(() => {
     if (!isOpen) {
@@ -285,10 +285,10 @@ const ProgramMultiSelect = ({ selectedProgramIds = [], onSelectionChange }) => {
   } = useProgramSearch()
 
   useEffect(() => {
-    if (selectedProgramIds.length === 0) {
+    if (selectedProgramIds.length === 0 && selectedPrograms.length > 0) {
       clearSelection()
     }
-  }, [clearSelection, selectedProgramIds])
+  }, [clearSelection, selectedProgramIds.length, selectedPrograms.length])
 
   const handleSelect = (program) => {
     onSelectionChange(toggleProgram(program))

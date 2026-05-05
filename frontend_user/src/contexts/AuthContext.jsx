@@ -84,8 +84,8 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', credentials)
-      const { access_token } = response.data
+      const { data } = await axios.post('http://localhost:5000/api/auth/login', credentials)
+      const { access_token } = data
       
       localStorage.setItem('token', access_token)
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
@@ -125,8 +125,22 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (profileData) => {
     try {
-      const response = await axios.put('http://localhost:5000/api/trainers/profile', profileData)
-      setUser(response.data)
+      await axios.put('http://localhost:5000/api/trainers/me/profile', profileData)
+      // If username changed, backend updated users table but token still contains old username.
+      // Force logout so trainer can re-login and receive a new token with updated sub.
+      if (profileData.username && user && profileData.username !== user.username) {
+        toast.success('Profile updated. Please log in again with your new username.')
+        logout()
+        return { success: true, relogin: true }
+      }
+
+      // Otherwise refresh local user data from backend to pick up trainer fields
+      try {
+        await fetchUser()
+      } catch (e) {
+        console.warn('Failed to refresh user after profile update', e)
+      }
+
       toast.success('Profile updated successfully')
       return { success: true }
     } catch (error) {
