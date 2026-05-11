@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    user_type VARCHAR(20) NOT NULL CHECK (user_type IN ('admin', 'trainer')),
+    full_name VARCHAR(150),
+    user_type VARCHAR(20) NOT NULL CHECK (user_type IN ('admin', 'trainer', 'supervisor')),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS programs (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
     description TEXT,
-    type VARCHAR(50) NOT NULL CHECK (type IN ('Institution', 'Community-Based', 'Others')),
+    type VARCHAR(50) NOT NULL CHECK (type IN ('Institution-Based', 'Community-Based', 'Microcredential')),
+    validity VARCHAR(100),
     hours INTEGER,
     schedule VARCHAR(20) DEFAULT '8 Hours/Day' CHECK (schedule IN ('8 Hours/Day', '4 Hours/Day')),
     days INTEGER,
@@ -44,12 +46,29 @@ CREATE TABLE IF NOT EXISTS programs (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create trainer_programs table for persistent trainer-program assignments
+-- Create trainer_qualifications table for the programs a trainer is qualified to handle
+CREATE TABLE IF NOT EXISTS trainer_qualifications (
+    id SERIAL PRIMARY KEY,
+    trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+    program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+    nttc_number VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(trainer_id, program_id)
+);
+
+-- Create trainer_programs table for persistent trainer-program teaching load assignments
 CREATE TABLE IF NOT EXISTS trainer_programs (
     id SERIAL PRIMARY KEY,
     trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
     assigned_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    hours_per_day INTEGER NOT NULL DEFAULT 8 CHECK (hours_per_day IN (4, 8)),
+    approval_status VARCHAR(20) NOT NULL DEFAULT 'for approval' CHECK (approval_status IN ('for approval', 'approved', 'rejected')),
+    approval_notes TEXT,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMP,
+    nttc_number VARCHAR(50),
     schedule_date DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -64,7 +83,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
     day_number INTEGER NOT NULL,
     hours_per_day INTEGER NOT NULL CHECK (hours_per_day IN (4, 8)),
-    status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave')),
+    status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave', 'incomplete')),
     schedule_date DATE,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -86,6 +105,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE TABLE IF NOT EXISTS otp_verifications (
     id SERIAL PRIMARY KEY,
     email VARCHAR(100) NOT NULL,
+    purpose VARCHAR(30) NOT NULL DEFAULT 'password_reset',
     otp_code VARCHAR(6) NOT NULL,
     is_verified BOOLEAN DEFAULT false,
     expires_at TIMESTAMP NOT NULL,
@@ -109,6 +129,8 @@ CREATE INDEX IF NOT EXISTS idx_trainers_username ON trainers(username);
 CREATE INDEX IF NOT EXISTS idx_trainers_user_id ON trainers(user_id);
 CREATE INDEX IF NOT EXISTS idx_programs_type ON programs(type);
 CREATE INDEX IF NOT EXISTS idx_programs_created_by ON programs(created_by);
+CREATE INDEX IF NOT EXISTS idx_trainer_qualifications_trainer_id ON trainer_qualifications(trainer_id);
+CREATE INDEX IF NOT EXISTS idx_trainer_qualifications_program_id ON trainer_qualifications(program_id);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_trainer_id ON trainer_programs(trainer_id);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_program_id ON trainer_programs(program_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_trainer_id ON schedules(trainer_id);
@@ -116,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_schedules_program_id ON schedules(program_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_trainer_program ON schedules(trainer_id, program_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_email ON otp_verifications(email);
+CREATE INDEX IF NOT EXISTS idx_otp_verifications_purpose ON otp_verifications(purpose);
 CREATE INDEX IF NOT EXISTS idx_verified_admin_emails_email ON verified_admin_emails(email);
 
 -- ============================================================================
@@ -139,15 +162,54 @@ ALTER TABLE IF EXISTS schedules
 DROP CONSTRAINT IF EXISTS schedules_status_check;
 
 ALTER TABLE IF EXISTS schedules 
-ADD CONSTRAINT schedules_status_check CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave'));
+ADD CONSTRAINT schedules_status_check CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave', 'incomplete'));
 
 -- Add missing columns to trainer_programs table if they don't exist
 ALTER TABLE IF EXISTS trainer_programs
 ADD COLUMN IF NOT EXISTS schedule_date DATE;
 
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS hours_per_day INTEGER NOT NULL DEFAULT 8;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) NOT NULL DEFAULT 'for approval';
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS approval_notes TEXT;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS approved_by INTEGER;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS nttc_number VARCHAR(50);
+
+ALTER TABLE IF EXISTS trainer_programs
+DROP CONSTRAINT IF EXISTS trainer_programs_hours_per_day_check;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD CONSTRAINT trainer_programs_hours_per_day_check CHECK (hours_per_day IN (4, 8));
+
+ALTER TABLE IF EXISTS trainer_programs
+DROP CONSTRAINT IF EXISTS trainer_programs_approval_status_check;
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD CONSTRAINT trainer_programs_approval_status_check CHECK (approval_status IN ('for approval', 'approved', 'rejected'));
+
 -- Add missing columns to users table if they don't exist
 ALTER TABLE IF EXISTS users
 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE IF EXISTS users
+ADD COLUMN IF NOT EXISTS full_name VARCHAR(150);
+
+ALTER TABLE IF EXISTS users
+DROP CONSTRAINT IF EXISTS users_user_type_check;
+
+ALTER TABLE IF EXISTS users
+ADD CONSTRAINT users_user_type_check CHECK (user_type IN ('admin', 'trainer', 'supervisor'));
 
 -- Add missing columns to trainers table if they don't exist
 ALTER TABLE IF EXISTS trainers
@@ -157,9 +219,90 @@ ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE IF EXISTS programs
 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
+ALTER TABLE IF EXISTS programs
+ADD COLUMN IF NOT EXISTS validity VARCHAR(100);
+
+ALTER TABLE IF EXISTS programs
+DROP CONSTRAINT IF EXISTS programs_type_check;
+
+ALTER TABLE IF EXISTS programs
+ADD CONSTRAINT programs_type_check CHECK (type IN ('Institution-Based', 'Community-Based', 'Microcredential'));
+
+ALTER TABLE IF EXISTS otp_verifications
+ADD COLUMN IF NOT EXISTS purpose VARCHAR(30) NOT NULL DEFAULT 'password_reset';
+
 -- ============================================================================
 -- Verification: Check schedules table structure
 -- ============================================================================
 -- Run this query to verify the schedules table has all required columns:
 -- SELECT column_name, data_type, is_nullable FROM information_schema.columns 
 -- WHERE table_name = 'schedules' ORDER BY ordinal_position;
+
+-- ============================================================================
+-- MIGRATION: Add trainer name breakdown and recognition fields
+-- ============================================================================
+-- Add new columns to trainers table for name breakdown and CTPR/recognition number
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS first_name VARCHAR(100);
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS middle_name VARCHAR(100);
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS last_name VARCHAR(100);
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS extension VARCHAR(50);
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS ctpr_recognition_number VARCHAR(100);
+
+ALTER TABLE IF EXISTS trainers
+ADD COLUMN IF NOT EXISTS trainer_type VARCHAR(50) CHECK (trainer_type IN ('Permanent', 'JO/Oncall'));
+
+-- Create trainer qualifications table when migrating an existing setup
+CREATE TABLE IF NOT EXISTS trainer_qualifications (
+    id SERIAL PRIMARY KEY,
+    trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+    program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+    nttc_number VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(trainer_id, program_id)
+);
+
+-- Seed baseline management accounts.
+-- Change these credentials after first login.
+INSERT INTO users (username, email, password_hash, full_name, user_type, is_active)
+VALUES
+    ('superadmin', 'superadmin@rtc.local', '$2b$12$GHSctgAoddZd1W4X7aYw.O2fx67xlOggFQ9db6sFXaToj36Na/f4q', 'Super Admin', 'admin', true),
+    ('supervisor', 'supervisor@rtc.local', '$2b$12$wTnYZPLio.OUZzQUarmhUehj1EIebIxh6itnA5mepuLOqmqzGRAfO', 'Default Supervisor', 'supervisor', true)
+ON CONFLICT (username) DO NOTHING;
+
+-- ==========================================================================
+-- Seed admin, trainer, and update superadmin/supervisor passwords
+-- ==========================================================================
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO users (username, email, password_hash, full_name, user_type, is_active)
+VALUES
+    ('superadmin', 'superadmin@rtc.local', crypt('SuperAdminPass123!', gen_salt('bf')), 'Super Admin', 'admin', true),
+    ('supervisor', 'supervisor@rtc.local', crypt('SupervisorPass123!', gen_salt('bf')), 'Default Supervisor', 'supervisor', true),
+    ('admin', 'admin@rtc.local', crypt('AdminPass123!', gen_salt('bf')), 'Admin User', 'admin', true),
+    ('trainer1', 'trainer1@rtc.local', crypt('UserPass123!', gen_salt('bf')), 'Trainer One', 'trainer', true)
+ON CONFLICT (username) DO UPDATE
+    SET email = EXCLUDED.email,
+            password_hash = EXCLUDED.password_hash,
+            full_name = EXCLUDED.full_name,
+            user_type = EXCLUDED.user_type,
+            is_active = EXCLUDED.is_active;
+
+-- Ensure a corresponding trainers row exists or is updated for the trainer account
+INSERT INTO trainers (user_id, username, trainer_name, is_active, created_at, updated_at)
+SELECT id, username, 'Trainer One', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+FROM users WHERE username = 'trainer1'
+ON CONFLICT (username) DO UPDATE
+    SET trainer_name = EXCLUDED.trainer_name,
+            is_active = EXCLUDED.is_active,
+            updated_at = EXCLUDED.updated_at;

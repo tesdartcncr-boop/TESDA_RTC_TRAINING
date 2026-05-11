@@ -1,0 +1,265 @@
+import React, { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useSearchParams } from 'react-router-dom'
+import { KeyRound, Mail, Pencil, Plus, ShieldCheck, User } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
+import ModalShell from '../components/ModalShell'
+import { cacheManager } from '../utils/cacheManager'
+
+const API_BASE = 'http://localhost:5000'
+const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
+
+export default function AdminAccounts() {
+  const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [editingAccount, setEditingAccount] = useState(null)
+  const roleFilter = searchParams.get('role') || (user?.user_type === 'supervisor' ? 'supervisor' : '')
+
+  const createForm = useForm({
+    defaultValues: {
+      username: '',
+      email: '',
+      full_name: '',
+      password: '',
+      user_type: roleFilter === 'supervisor' ? 'supervisor' : 'admin',
+    },
+  })
+
+  const editForm = useForm({
+    defaultValues: {
+      email: '',
+      full_name: '',
+      password: '',
+      is_active: true,
+    },
+  })
+
+  const loadAccounts = async () => {
+    setLoading(true)
+    try {
+      const cacheKey = cacheManager.generateKey('accounts_list', { role: roleFilter || null })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setAccounts(cached)
+        setLoading(false)
+        return
+      }
+
+      const query = roleFilter ? `?role=${encodeURIComponent(roleFilter)}` : ''
+      const response = await fetch(`${API_BASE}/api/admin/accounts${query}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to load accounts')
+      const nextAccounts = Array.isArray(data) ? data : []
+      setAccounts(nextAccounts)
+      cacheManager.set(cacheKey, nextAccounts)
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAccounts()
+  }, [roleFilter])
+
+  const handleCreate = async (values) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/accounts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(values),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to create account')
+      toast.success('Account created successfully')
+      cacheManager.clearPattern('accounts_list:')
+      cacheManager.clearPattern('stats_')
+      setShowCreateModal(false)
+      createForm.reset()
+      loadAccounts()
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const handleOpenEdit = (account) => {
+    setEditingAccount(account)
+    editForm.reset({
+      email: account.email,
+      full_name: account.full_name || '',
+      password: '',
+      is_active: account.is_active,
+    })
+  }
+
+  const handleUpdate = async (values) => {
+    try {
+      const payload = {
+        email: values.email,
+        full_name: values.full_name,
+        is_active: values.is_active,
+      }
+      if (values.password) payload.password = values.password
+
+      const response = await fetch(`${API_BASE}/api/admin/accounts/${editingAccount.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to update account')
+      toast.success('Account updated successfully')
+      cacheManager.clearPattern('accounts_list:')
+      cacheManager.clearPattern('stats_')
+      setEditingAccount(null)
+      loadAccounts()
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const pageTitle = user?.user_type === 'supervisor' ? 'Supervisor Accounts' : 'Admin Accounts'
+  const pageDescription = user?.user_type === 'supervisor'
+    ? 'Review supervisor accounts and manage password updates.'
+    : 'Create and manage admin or supervisor accounts with email-based password recovery.'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-black text-slate-900">{pageTitle}</h1>
+          <p className="mt-2 text-sm text-slate-600">{pageDescription}</p>
+        </div>
+        {user?.user_type === 'admin' && (
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Create Account
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading accounts...</div>
+      ) : (
+        <div className="grid gap-5 xl:grid-cols-2">
+          {accounts.map((account) => (
+            <div key={account.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+                  {account.user_type === 'admin' ? <ShieldCheck className="h-7 w-7" /> : <User className="h-7 w-7" />}
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">{account.user_type}</p>
+                  <h3 className="mt-2 text-xl font-bold text-slate-900">{account.full_name || account.username}</h3>
+                  <p className="text-sm text-slate-500">@{account.username}</p>
+                  <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                    <Mail className="h-4 w-4" />
+                    <span>{account.email}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-between">
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${account.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                  {account.is_active ? 'Active' : 'Inactive'}
+                </span>
+                <button type="button" onClick={() => handleOpenEdit(account)} className="inline-flex items-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {!accounts.length && (
+            <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
+              No accounts found.
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCreateModal && (
+        <ModalShell title="Create Management Account" onClose={() => setShowCreateModal(false)} maxWidth="max-w-xl">
+          <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
+            <div>
+              <label htmlFor="create_full_name" className="block text-sm font-semibold text-slate-700">Full Name</label>
+              <input id="create_full_name" {...createForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="create_username" className="block text-sm font-semibold text-slate-700">Username</label>
+              <input id="create_username" {...createForm.register('username', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="create_email" className="block text-sm font-semibold text-slate-700">Email</label>
+              <input id="create_email" type="email" {...createForm.register('email', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="create_password" className="block text-sm font-semibold text-slate-700">Password</label>
+              <input id="create_password" type="password" {...createForm.register('password', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="create_role" className="block text-sm font-semibold text-slate-700">Account Role</label>
+              <select id="create_role" {...createForm.register('user_type')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+                <option value="admin">Admin</option>
+                <option value="supervisor">Supervisor</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Create Account</button>
+            </div>
+          </form>
+        </ModalShell>
+      )}
+
+      {editingAccount && (
+        <ModalShell title="Edit Account" onClose={() => setEditingAccount(null)} maxWidth="max-w-xl">
+          <form className="space-y-4" onSubmit={editForm.handleSubmit(handleUpdate)}>
+            <div>
+              <label htmlFor="edit_full_name" className="block text-sm font-semibold text-slate-700">Full Name</label>
+              <input id="edit_full_name" {...editForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="edit_email" className="block text-sm font-semibold text-slate-700">Email</label>
+              <input id="edit_email" type="email" {...editForm.register('email', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="edit_password" className="block text-sm font-semibold text-slate-700">New Password</label>
+              <div className="relative mt-2">
+                <KeyRound className="pointer-events-none absolute left-3 top-3.5 h-5 w-5 text-slate-400" />
+                <input id="edit_password" type="password" {...editForm.register('password')} placeholder="Leave blank to keep current password" className="w-full rounded-2xl border border-slate-200 px-4 py-3 pl-11 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              </div>
+            </div>
+            {user?.user_type === 'admin' && (
+              <label htmlFor="edit_is_active" className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                <input id="edit_is_active" type="checkbox" {...editForm.register('is_active')} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+                <span>Account is active</span>
+              </label>
+            )}
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setEditingAccount(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Update Account</button>
+            </div>
+          </form>
+        </ModalShell>
+      )}
+    </div>
+  )
+}

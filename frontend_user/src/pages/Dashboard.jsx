@@ -1,272 +1,147 @@
 import React, { useEffect, useState } from 'react'
+import { BookOpen, Briefcase, CalendarDays } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import TrainerScheduleView from '../components/TrainerScheduleView'
-import { BookOpen, Clock, Zap, Award, Briefcase, Building2, Users } from 'lucide-react'
+import { cacheManager } from '../utils/cacheManager'
 
-const Dashboard = () => {
-  const { user, loading: authLoading } = useAuth()
-  const [programs, setPrograms] = useState([])
-  const [selectedProgram, setSelectedProgram] = useState(null)
+const API_BASE = 'http://localhost:5000'
+const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
+
+export default function Dashboard() {
+  const { user } = useAuth()
+  const [teachingLoads, setTeachingLoads] = useState([])
+  const [selectedLoad, setSelectedLoad] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!authLoading && user?.id) {
-      fetchTrainerPrograms()
-    } else if (!authLoading && !user?.id) {
-      setLoading(false)
-    }
-  }, [user?.id, authLoading])
-
-  const fetchTrainerPrograms = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(
-        `http://localhost:5000/api/schedules/trainer/${user.id}/programs`,
-        {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-        }
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        setPrograms(data)
-        setSelectedProgram((currentProgram) => {
-          if (!data.length) return null
-          if (!currentProgram) return data[0]
-          return data.find((program) => program.id === currentProgram.id) || data[0]
-        })
+    const loadTeachingLoads = async () => {
+      if (!user?.id) {
+        setLoading(false)
+        return
       }
-    } catch (fetchError) {
-      console.error('Error fetching programs:', fetchError)
-    } finally {
-      setLoading(false)
+
+      try {
+        const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: user.id })
+        const cached = cacheManager.get(cacheKey)
+        if (cached !== null) {
+          const cachedLoads = Array.isArray(cached) ? cached : []
+          setTeachingLoads(cachedLoads)
+          setSelectedLoad(cachedLoads[0] || null)
+          setLoading(false)
+          return
+        }
+
+        const response = await fetch(`${API_BASE}/api/schedules/trainer/${user.id}/programs`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        })
+        const data = await response.json()
+        const loads = Array.isArray(data) ? data : []
+        setTeachingLoads(loads)
+        setSelectedLoad(loads[0] || null)
+        cacheManager.set(cacheKey, loads)
+      } catch (error) {
+        console.error(error)
+        setTeachingLoads([])
+      } finally {
+        setLoading(false)
+      }
     }
-  }
+    loadTeachingLoads()
+  }, [user?.id])
 
-  const getTypeColor = (type) => {
-    switch (type) {
-      case 'Institution':
-        return 'bg-blue-100 text-blue-800 border border-blue-300'
-      case 'Community-Based':
-        return 'bg-green-100 text-green-800 border border-green-300'
-      default:
-        return 'bg-gray-100 text-gray-800 border border-gray-300'
-    }
-  }
+  const totalHours = teachingLoads.reduce((sum, load) => sum + (load.program_total_hours || 0), 0)
+  const totalDays = teachingLoads.reduce((sum, load) => sum + (load.program_days || 0), 0)
 
-  const getTypeIcon = (type) => {
-    switch (type) {
-      case 'Institution':
-        return Building2
-      case 'Community-Based':
-        return Users
-      default:
-        return BookOpen
-    }
-  }
-
-  const getTotalHours = () => programs.reduce((sum, program) => (
-    sum + (program.program_total_hours || ((program.program_days || 0) * (program.hours_per_day || 8)))
-  ), 0)
-
-  const handleProgramUpdate = (updatedProgram) => {
-    setPrograms((prev) => prev.map((program) => (
-      program.id === updatedProgram.id ? { ...program, ...updatedProgram } : program
-    )))
-    setSelectedProgram((currentProgram) => (
-      currentProgram?.id === updatedProgram.id ? { ...currentProgram, ...updatedProgram } : currentProgram
-    ))
-  }
-
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    )
-  }
-
-  if (!user?.id) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <div className="text-gray-500">Unable to load dashboard. Please log in again.</div>
-      </div>
-    )
-  }
-
+  let loadsContent
   if (loading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    loadsContent = (
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading approved teaching loads...</div>
+    )
+  } else if (teachingLoads.length === 0) {
+    loadsContent = (
+      <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
+        No approved teaching loads yet.
+      </div>
+    )
+  } else {
+    loadsContent = (
+      <div className="grid gap-6 lg:grid-cols-[0.95fr_1.35fr]">
+        <div className="space-y-3">
+          {teachingLoads.map((load) => (
+            <button
+              type="button"
+              key={load.id}
+              onClick={() => setSelectedLoad(load)}
+              className={`w-full rounded-[2rem] border p-5 text-left shadow-sm transition ${
+                selectedLoad?.id === load.id
+                  ? 'border-cyan-400 bg-cyan-50'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{load.approval_status}</p>
+              <h3 className="mt-2 text-xl font-bold text-slate-900">{load.program_name}</h3>
+              <p className="mt-1 text-sm text-slate-600">{load.program_type}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">{load.hours_per_day} hrs/day</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{load.program_days} days</span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div>
+          {selectedLoad && (
+            <TrainerScheduleView program={selectedLoad} trainerId={user.id} />
+          )}
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome, {user?.trainer_name || user?.username || 'Trainer'}
-        </h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Here's an overview of your assigned training programs and schedule
+      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
+        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
+        <h1 className="mt-4 text-4xl font-black">{user?.trainer_name || user?.full_name || user?.username}</h1>
+        <p className="mt-3 max-w-2xl text-cyan-50/90">
+          Approved teaching loads appear here. Mark each training day to keep your calendar accurate.
         </p>
-      </div>
+      </section>
 
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg shadow-md p-6 text-white">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <section className="grid gap-4 md:grid-cols-3">
+        {[
+          { label: 'Approved Loads', value: teachingLoads.length, icon: Briefcase },
+          { label: 'Total Calendar Days', value: totalDays, icon: CalendarDays },
+          { label: 'Total Hours', value: totalHours, icon: BookOpen },
+        ].map((card) => (
+          <div key={card.label} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-700">
+              <card.icon className="h-6 w-6" />
+            </div>
+            <p className="mt-4 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{card.label}</p>
+            <p className="mt-2 text-3xl font-black text-slate-900">{card.value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-3 md:grid-cols-3">
           <div>
-            <p className="text-blue-100 text-sm mb-2">Full Name</p>
-            <div>
-              <h2 className="text-2xl font-bold">{user?.trainer_name || user?.username || 'Trainer'}</h2>
-            </div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">TM Number</p>
+            <p className="mt-2 text-lg font-bold text-slate-900">{user?.tm_number || 'Not set'}</p>
           </div>
-
-          <div className="space-y-3">
-            {user?.tm_number && (
-              <div className="flex items-start gap-3">
-                <Award className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-blue-100 text-sm">TM Number</p>
-                  <p className="font-semibold">{user.tm_number}</p>
-                  {user?.tm_expiration && (
-                    <p className="text-xs text-blue-100">Expires: {new Date(user.tm_expiration).toLocaleDateString()}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            {user?.nttc_number && (
-              <div className="flex items-start gap-3">
-                <Briefcase className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-blue-100 text-sm">NTTC Number</p>
-                  <p className="font-semibold">{user.nttc_number}</p>
-                  {user?.nttc_expiration && (
-                    <p className="text-xs text-blue-100">Expires: {new Date(user.nttc_expiration).toLocaleDateString()}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            {!user?.tm_number && !user?.nttc_number && (
-              <p className="text-blue-100 text-sm italic">No certifications on file</p>
-            )}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Email</p>
+            <p className="mt-2 text-lg font-bold text-slate-900">{user?.email || 'Not set'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Recognition</p>
+            <p className="mt-2 text-lg font-bold text-slate-900">{user?.ctpr_recognition_number || 'Not set'}</p>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
-          <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-blue-100">
-              <BookOpen className="h-6 w-6 text-blue-600" />
-            </div>
-            <div className="ml-5 w-0 flex-1">
-              <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">Assigned Programs</dt>
-                <dd className="text-lg font-bold text-gray-900">{programs.length}</dd>
-              </dl>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
-          <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-green-100">
-              <Clock className="h-6 w-6 text-green-600" />
-            </div>
-            <div className="ml-5 w-0 flex-1">
-              <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">Total Days</dt>
-                <dd className="text-lg font-bold text-gray-900">
-                  {programs.reduce((sum, program) => sum + (program.program_days || 0), 0)}
-                </dd>
-              </dl>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
-          <div className="flex items-center">
-            <div className="flex-shrink-0 p-3 rounded-md bg-purple-100">
-              <Zap className="h-6 w-6 text-purple-600" />
-            </div>
-            <div className="ml-5 w-0 flex-1">
-              <dl>
-                <dt className="text-sm font-medium text-gray-500 truncate">Total Hours</dt>
-                <dd className="text-lg font-bold text-gray-900">{getTotalHours()}h</dd>
-              </dl>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {programs.length === 0 && (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Programs Assigned</h3>
-          <p className="text-gray-600">You currently have no training programs assigned to you.</p>
-        </div>
-      )}
-
-      {programs.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                <BookOpen className="h-5 w-5 mr-2 text-blue-600" />
-                Your Programs
-              </h3>
-              <div className="space-y-2">
-                {programs.map((program) => {
-                  const TypeIcon = getTypeIcon(program.program_type)
-
-                  return (
-                    <button
-                      key={program.id}
-                      onClick={() => setSelectedProgram(program)}
-                      className={`w-full text-left p-4 rounded-lg transition-all border-2 ${
-                        selectedProgram?.id === program.id
-                          ? 'bg-blue-50 border-blue-500 shadow-md'
-                          : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <p className="font-bold text-gray-900 text-sm">{program.program_name}</p>
-                          <p className="text-xs text-gray-600 mt-1">{program.program_days} days</p>
-                          <p className="text-xs text-gray-500 mt-1">{program.program_schedule}</p>
-                        </div>
-                        <TypeIcon className="h-5 w-5 text-gray-500 flex-shrink-0" />
-                      </div>
-                      <div className="mt-2">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${getTypeColor(
-                            program.program_type
-                          )}`}
-                        >
-                          {program.program_type}
-                        </span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-3">
-            {selectedProgram && (
-              <TrainerScheduleView
-                program={selectedProgram}
-                trainerId={user.id}
-                onProgramUpdate={handleProgramUpdate}
-              />
-            )}
-          </div>
-        </div>
-      )}
+      {loadsContent}
     </div>
   )
 }
-
-export default Dashboard

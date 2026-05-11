@@ -1,27 +1,41 @@
-import math
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from backend.schemas import ScheduleHoursUpdate, ScheduleUpdate
-from backend.socket_manager import broadcast_schedule_update
-from backend.supabase_rest import (
-    SupabaseAPIError,
-    delete_rows,
-    insert_row,
-    select_one,
-    select_rows,
-    update_row,
-    update_rows,
+from .auth import get_current_user
+from ..cache_manager import cache_manager
+from ..schedule_utils import (
+    VALID_HOURS_PER_DAY,
+    VALID_STATUSES,
+    build_assignment_summary,
+    load_schedule_rows,
+    sync_assignment_schedule,
 )
+from ..schemas import ScheduleHoursUpdate, ScheduleUpdate, TeachingLoadApprovalUpdate
+from ..socket_manager import broadcast_schedule_update, send_notification_to_user
+from ..supabase_rest import SupabaseAPIError, delete_rows, select_one, select_rows, update_row
 
 router = APIRouter()
 
-DEFAULT_HOURS_PER_DAY = 8
-DAY_SETTINGS_MARKER = 0
-VALID_HOURS_PER_DAY = {4, 8}
-VALID_STATUSES = {"complete", "absent", "suspended", "leave"}
+SCHEDULES_CACHE_PATTERN = "schedules:*"
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+def get_trainer_programs_cache_key(trainer_id: int) -> str:
+    return cache_manager.get_cache_key("schedules_trainer_programs", trainer_id=trainer_id)
+
+
+def get_schedule_cache_key(trainer_id: int, program_id: int) -> str:
+    return cache_manager.get_cache_key("schedules_schedule", trainer_id=trainer_id, program_id=program_id)
+
+
+def clear_schedule_caches():
+    cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
+    cache_manager.clear_pattern("schedules_trainer_programs:*")
+    cache_manager.clear_pattern("schedules_schedule:*")
+    cache_manager.clear_pattern("trainer_schedule:*")
+    cache_manager.clear_pattern("trainer_programs:*")
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -29,84 +43,22 @@ def raise_supabase_http(exc: SupabaseAPIError):
     raise HTTPException(status_code=status_code, detail=exc.message) from exc
 
 
-def hours_per_day_to_label(hours_per_day: int) -> str:
-    return f"{hours_per_day} Hours/Day"
+def get_trainer_or_404(trainer_id: int) -> dict:
+    trainer = select_one("trainers", filters={"id": f"eq.{trainer_id}"})
+    if not trainer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trainer not found")
+    return trainer
 
 
-def get_program_base_hours(program: dict[str, Any]) -> int:
-    return 4 if program.get("schedule") == "4 Hours/Day" else DEFAULT_HOURS_PER_DAY
-
-
-def get_program_total_hours(program: dict[str, Any]) -> int:
-    hours = program.get("hours")
-    if hours not in (None, ""):
-        try:
-            return int(hours)
-        except (TypeError, ValueError):
-            pass
-
-    days = program.get("days") or 0
-    try:
-        return int(days) * get_program_base_hours(program)
-    except (TypeError, ValueError):
-        return 0
-
-
-def get_saved_hours_per_day(trainer_id: int, program_id: int, fallback_hours: int) -> int:
-    settings_row = select_one(
-        "schedules",
+def get_assignment_or_404(trainer_id: int, program_id: int) -> tuple[dict, dict, dict]:
+    trainer = get_trainer_or_404(trainer_id)
+    assignment = select_one(
+        "trainer_programs",
         filters={
             "trainer_id": f"eq.{trainer_id}",
             "program_id": f"eq.{program_id}",
-            "day_number": f"eq.{DAY_SETTINGS_MARKER}",
         },
     )
-    saved_hours = settings_row.get("hours_per_day") if settings_row else None
-    return saved_hours if saved_hours in VALID_HOURS_PER_DAY else fallback_hours
-
-
-def get_effective_program_days(program: dict[str, Any], hours_per_day: int) -> int:
-    total_hours = get_program_total_hours(program)
-    if total_hours > 0:
-        return math.ceil(total_hours / hours_per_day)
-
-    try:
-        return int(program.get("days") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def build_program_summary(
-    trainer_id: int,
-    assignment: dict[str, Any],
-    program: dict[str, Any],
-) -> dict[str, Any]:
-    default_hours = get_program_base_hours(program)
-    hours_per_day = get_saved_hours_per_day(trainer_id, assignment["program_id"], default_hours)
-    total_hours = get_program_total_hours(program)
-
-    return {
-        "id": assignment["id"],
-        "trainer_id": trainer_id,
-        "program_id": program["id"],
-        "program_name": program.get("name"),
-        "program_type": program.get("type"),
-        "program_days": get_effective_program_days(program, hours_per_day),
-        "base_program_days": program.get("days") or 0,
-        "program_total_hours": total_hours,
-        "program_schedule": hours_per_day_to_label(hours_per_day),
-        "hours_per_day": hours_per_day,
-        "schedule_date": assignment.get("schedule_date"),
-        "created_at": assignment.get("created_at"),
-    }
-
-
-def ensure_assignment_context(trainer_id: int, program_id: int):
-    assignment_filters = {
-        "trainer_id": f"eq.{trainer_id}",
-        "program_id": f"eq.{program_id}",
-    }
-    assignment = select_one("trainer_programs", filters=assignment_filters)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assigned schedule not found")
 
@@ -114,52 +66,72 @@ def ensure_assignment_context(trainer_id: int, program_id: int):
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
 
-    return assignment, program
+    return trainer, assignment, program
 
 
-def upsert_schedule_settings(trainer_id: int, program_id: int, hours_per_day: int):
-    now = datetime.now().isoformat()
-    settings_filters = {
-        "trainer_id": f"eq.{trainer_id}",
-        "program_id": f"eq.{program_id}",
-        "day_number": f"eq.{DAY_SETTINGS_MARKER}",
-    }
-    existing_settings = select_one("schedules", filters=settings_filters)
-
-    settings_payload = {
-        "hours_per_day": hours_per_day,
-        "updated_at": now,
-    }
-
-    if existing_settings:
-        return update_row("schedules", settings_payload, filters=settings_filters) or existing_settings
-
-    settings_payload.update(
-        {
-            "trainer_id": trainer_id,
-            "program_id": program_id,
-            "day_number": DAY_SETTINGS_MARKER,
-            "created_at": now,
-        }
-    )
-    return insert_row("schedules", settings_payload)
+def ensure_management_role(current_user: dict):
+    if current_user.get("user_type") not in {"admin", "supervisor"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
 
-@router.get("/trainer/{trainer_id}/programs", responses={500: {"description": "Database query failed"}})
-async def get_trainer_programs_schedules(trainer_id: int) -> list:
+def ensure_assignment_view_access(current_user: dict, trainer: dict, assignment: dict):
+    if current_user.get("user_type") in {"admin", "supervisor"}:
+        return
+
+    if trainer.get("username") != current_user.get("username"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    if assignment.get("approval_status") != "approved":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teaching load is not approved yet.")
+
+
+def ensure_assignment_edit_access(current_user: dict, trainer: dict, assignment: dict):
+    if current_user.get("user_type") == "admin":
+        return
+
+    if current_user.get("user_type") != "trainer" or trainer.get("username") != current_user.get("username"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    if assignment.get("approval_status") != "approved":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teaching load is not approved yet.")
+
+
+@router.get("/trainer/{trainer_id}/programs")
+async def get_trainer_programs_schedules(
+    trainer_id: int,
+    current_user: CurrentUser,
+    approval_status: str | None = Query(None),
+) -> list:
     try:
+        trainer = get_trainer_or_404(trainer_id)
+        cache_key = get_trainer_programs_cache_key(trainer_id)
+        cached = cache_manager.get(cache_key)
+        if cached is not None and approval_status is None:
+            if current_user.get("user_type") == "trainer":
+                return [row for row in cached if row.get("approval_status") == "approved"]
+            return cached
+
+        filters = {"trainer_id": f"eq.{trainer_id}"}
+        if approval_status:
+            filters["approval_status"] = f"eq.{approval_status}"
+
         assignments = select_rows(
             table="trainer_programs",
-            filters={"trainer_id": f"eq.{trainer_id}"},
+            filters=filters,
             order="created_at.desc",
         )
 
         result = []
         for assignment in assignments:
             program = select_one("programs", filters={"id": f"eq.{assignment['program_id']}"})
-            if program:
-                result.append(build_program_summary(trainer_id, assignment, program))
+            if not program:
+                continue
+            ensure_assignment_view_access(current_user, trainer, assignment)
+            synced_rows = sync_assignment_schedule(assignment, program)
+            result.append(build_assignment_summary(trainer, assignment, program, synced_rows))
 
+        if approval_status is None:
+            cache_manager.set(cache_key, result)
         return result
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -169,31 +141,35 @@ async def get_trainer_programs_schedules(trainer_id: int) -> list:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/trainer/{trainer_id}/program/{program_id}/schedule", responses={500: {"description": "Database query failed"}})
-async def get_schedule_for_trainer_program(trainer_id: int, program_id: int) -> list:
+@router.get("/trainer/{trainer_id}/program/{program_id}/schedule")
+async def get_schedule_for_trainer_program(trainer_id: int, program_id: int, current_user: CurrentUser) -> list:
     try:
-        schedules = select_rows(
-            table="schedules",
-            filters={
-                "trainer_id": f"eq.{trainer_id}",
-                "program_id": f"eq.{program_id}",
-                "day_number": "gt.0",
-            },
-            order="day_number",
-        )
-        return schedules or []
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        ensure_assignment_view_access(current_user, trainer, assignment)
+
+        cache_key = get_schedule_cache_key(trainer_id, program_id)
+        cached = cache_manager.get(cache_key)
+        if cached is not None:
+            return cached
+
+        synced_rows = sync_assignment_schedule(assignment, program)
+        cache_manager.set(cache_key, synced_rows)
+        return synced_rows
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/trainer/{trainer_id}/program/{program_id}/day/{day_number}", responses={400: {"description": "Invalid hours_per_day or status value"}, 500: {"description": "Database operation failed"}})
+@router.post("/trainer/{trainer_id}/program/{program_id}/day/{day_number}")
 async def create_or_update_schedule_day(
     trainer_id: int,
     program_id: int,
     day_number: int,
     request: ScheduleUpdate,
+    current_user: CurrentUser,
 ) -> dict[str, Any]:
     if day_number <= 0:
         raise HTTPException(status_code=400, detail="day_number must be greater than 0")
@@ -201,55 +177,48 @@ async def create_or_update_schedule_day(
     if request.hours_per_day not in VALID_HOURS_PER_DAY:
         raise HTTPException(status_code=400, detail="hours_per_day must be 4 or 8")
 
-    if request.status and request.status not in VALID_STATUSES:
+    if request.status and request.status.value not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status value")
 
     try:
-        ensure_assignment_context(trainer_id, program_id)
-        upsert_schedule_settings(trainer_id, program_id, request.hours_per_day)
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        ensure_assignment_edit_access(current_user, trainer, assignment)
 
-        filters = {
-            "trainer_id": f"eq.{trainer_id}",
-            "program_id": f"eq.{program_id}",
-            "day_number": f"eq.{day_number}",
-        }
-        existing = select_one("schedules", filters=filters)
+        existing_rows = sync_assignment_schedule(assignment, program)
+        existing = next((row for row in existing_rows if int(row.get("day_number") or 0) == day_number), None)
+        if not existing:
+            synced_again = sync_assignment_schedule(assignment, program)
+            existing = next((row for row in synced_again if int(row.get("day_number") or 0) == day_number), None)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Schedule day not found")
 
-        schedule_data = {
-            "trainer_id": trainer_id,
-            "program_id": program_id,
-            "day_number": day_number,
+        payload = {
             "hours_per_day": request.hours_per_day,
-            "status": request.status,
+            "status": request.status.value if request.status else None,
             "updated_at": datetime.now().isoformat(),
         }
-
         if request.schedule_date is not None:
-            schedule_data["schedule_date"] = request.schedule_date
+            payload["schedule_date"] = request.schedule_date
         if request.notes is not None:
-            schedule_data["notes"] = request.notes
+            payload["notes"] = request.notes
 
-        if existing:
-            result = update_row("schedules", schedule_data, filters=filters)
-            operation = "updated"
-        else:
-            schedule_data["created_at"] = datetime.now().isoformat()
-            result = insert_row("schedules", schedule_data)
-            operation = "created"
+        result = update_row("schedules", payload, filters={"id": f"eq.{existing['id']}"}) or existing
+        synced_rows = sync_assignment_schedule(assignment, program)
+        clear_schedule_caches()
+        cache_manager.set(get_schedule_cache_key(trainer_id, program_id), synced_rows)
+        cache_manager.clear_pattern("trainer_schedule:.*")
 
-        try:
-            await broadcast_schedule_update(
-                {
-                    "trainer_id": trainer_id,
-                    "program_id": program_id,
-                    "day_number": day_number,
-                    "data": result,
-                }
-            )
-        except Exception:
-            pass
+        await broadcast_schedule_update(
+            {
+                "event_type": "day_updated",
+                "trainer_id": trainer_id,
+                "program_id": program_id,
+                "day_number": day_number,
+                "data": result,
+            }
+        )
 
-        return {"status": operation, "data": result}
+        return {"status": "updated", "data": result}
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
     except HTTPException:
@@ -258,79 +227,45 @@ async def create_or_update_schedule_day(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.put("/trainer/{trainer_id}/program/{program_id}/hours-per-day", responses={400: {"description": "Invalid hours_per_day value"}, 500: {"description": "Database operation failed"}})
+@router.put("/trainer/{trainer_id}/program/{program_id}/hours-per-day")
 async def update_assignment_hours_per_day(
     trainer_id: int,
     program_id: int,
     request: ScheduleHoursUpdate,
+    current_user: CurrentUser,
 ) -> dict[str, Any]:
     if request.hours_per_day not in VALID_HOURS_PER_DAY:
         raise HTTPException(status_code=400, detail="hours_per_day must be 4 or 8")
 
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Admin access required.")
+
     try:
-        assignment, program = ensure_assignment_context(trainer_id, program_id)
-        upsert_schedule_settings(trainer_id, program_id, request.hours_per_day)
-        update_rows(
-            "schedules",
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        updated_assignment = update_row(
+            "trainer_programs",
             {
                 "hours_per_day": request.hours_per_day,
                 "updated_at": datetime.now().isoformat(),
             },
-            filters={
-                "trainer_id": f"eq.{trainer_id}",
-                "program_id": f"eq.{program_id}",
-                "day_number": "gt.0",
-            },
-        )
+            filters={"id": f"eq.{assignment['id']}"},
+        ) or assignment
 
-        return build_program_summary(trainer_id, assignment, program)
-    except SupabaseAPIError as exc:
-        raise_supabase_http(exc)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        synced_rows = sync_assignment_schedule(updated_assignment, program)
+        clear_schedule_caches()
+        summary = build_assignment_summary(trainer, updated_assignment, program, synced_rows)
+        cache_manager.clear_pattern("trainer_schedule:.*")
 
-
-@router.post("/trainer/{trainer_id}/program/{program_id}/batch", responses={500: {"description": "Database operation failed"}})
-async def batch_create_schedules(trainer_id: int, program_id: int, days: list[dict]) -> dict[str, Any]:
-    try:
-        ensure_assignment_context(trainer_id, program_id)
-
-        created = []
-        last_hours_per_day = None
-
-        for day in days:
-            day_num = day.get("day_number")
-            hours = day.get("hours_per_day", DEFAULT_HOURS_PER_DAY)
-            date_str = day.get("schedule_date")
-
-            if not isinstance(day_num, int) or day_num <= 0 or hours not in VALID_HOURS_PER_DAY:
-                continue
-
-            schedule_data = {
+        await broadcast_schedule_update(
+            {
+                "event_type": "hours_per_day_updated",
                 "trainer_id": trainer_id,
                 "program_id": program_id,
-                "day_number": day_num,
-                "hours_per_day": hours,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "hours_per_day": request.hours_per_day,
+                "data": summary,
             }
-
-            if date_str:
-                schedule_data["schedule_date"] = date_str
-
-            try:
-                result = insert_row("schedules", schedule_data)
-                created.append(result)
-                last_hours_per_day = hours
-            except SupabaseAPIError:
-                continue
-
-        if last_hours_per_day in VALID_HOURS_PER_DAY:
-            upsert_schedule_settings(trainer_id, program_id, last_hours_per_day)
-
-        return {"status": "batch_created", "count": len(created), "data": created}
+        )
+        return summary
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
     except HTTPException:
@@ -339,33 +274,134 @@ async def batch_create_schedules(trainer_id: int, program_id: int, days: list[di
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete("/schedule/{schedule_id}", responses={500: {"description": "Database operation failed"}})
-async def delete_schedule_entry(schedule_id: int) -> dict[str, Any]:
+@router.get("/approval-queue")
+async def get_approval_queue(current_user: CurrentUser, approval_status: str | None = Query(None)):
+    ensure_management_role(current_user)
+
     try:
-        delete_rows("schedules", filters={"id": f"eq.{schedule_id}"})
+        filters = {}
+        if approval_status:
+            filters["approval_status"] = f"eq.{approval_status}"
+
+        assignments = select_rows("trainer_programs", filters=filters, order="created_at.desc")
+        queue = []
+        for assignment in assignments:
+            trainer = select_one("trainers", filters={"id": f"eq.{assignment['trainer_id']}"})
+            program = select_one("programs", filters={"id": f"eq.{assignment['program_id']}"})
+            if not trainer or not program:
+                continue
+            synced_rows = sync_assignment_schedule(assignment, program)
+            queue.append(build_assignment_summary(trainer, assignment, program, synced_rows))
+        return queue
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.put("/trainer/{trainer_id}/program/{program_id}/approval")
+async def update_assignment_approval(
+    trainer_id: int,
+    program_id: int,
+    payload: TeachingLoadApprovalUpdate,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    ensure_management_role(current_user)
+
+    try:
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        update_payload = {
+            "approval_status": payload.approval_status.value,
+            "approval_notes": payload.approval_notes,
+            "approved_by": current_user["id"],
+            "approved_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        updated_assignment = update_row(
+            "trainer_programs",
+            update_payload,
+            filters={"id": f"eq.{assignment['id']}"},
+        ) or assignment
+        synced_rows = sync_assignment_schedule(updated_assignment, program)
+        clear_schedule_caches()
+        summary = build_assignment_summary(trainer, updated_assignment, program, synced_rows)
+        cache_manager.clear_pattern("trainer_schedule:.*")
+
+        message = (
+            f"{program['name']} has been approved."
+            if payload.approval_status.value == "approved"
+            else f"{program['name']} has been rejected."
+        )
+        await send_notification_to_user(trainer["user_id"], "Teaching Load Update", message)
+        await broadcast_schedule_update(
+            {
+                "event_type": "assignment_approval_updated",
+                "trainer_id": trainer_id,
+                "program_id": program_id,
+                "data": summary,
+            }
+        )
+        return summary
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.post("/trainer/{trainer_id}/program/{program_id}/batch")
+async def batch_create_schedules(trainer_id: int, program_id: int, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Admin access required.")
+
+    try:
+        _trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        synced_rows = sync_assignment_schedule(assignment, program)
+        clear_schedule_caches()
+        return {"status": "synced", "count": len(synced_rows), "data": synced_rows}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.delete("/schedule/{schedule_id}")
+async def delete_schedule_entry(schedule_id: int, current_user: CurrentUser) -> dict[str, Any]:
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Admin access required.")
+
+    try:
+        delete_rows("schedules", filters={"id": f"eq.{schedule_id}"}, returning="minimal")
+        clear_schedule_caches()
+        cache_manager.clear_pattern("trainer_schedule:.*")
         return {"status": "deleted"}
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete("/trainer/{trainer_id}/program/{program_id}/assignment", responses={404: {"description": "Assigned schedule not found"}, 500: {"description": "Database operation failed"}})
-async def delete_trainer_program_assignment(trainer_id: int, program_id: int):
+@router.delete("/trainer/{trainer_id}/program/{program_id}/assignment")
+async def delete_trainer_program_assignment(trainer_id: int, program_id: int, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Admin access required.")
+
     try:
-        assignment, _program = ensure_assignment_context(trainer_id, program_id)
-
-        schedule_filters = {
-            "trainer_id": f"eq.{trainer_id}",
-            "program_id": f"eq.{program_id}",
-        }
-        deleted_schedules = delete_rows("schedules", filters=schedule_filters)
+        _trainer, assignment, _program = get_assignment_or_404(trainer_id, program_id)
+        deleted_schedules = delete_rows(
+            "schedules",
+            filters={
+                "trainer_id": f"eq.{trainer_id}",
+                "program_id": f"eq.{program_id}",
+            },
+        )
         delete_rows(
             "trainer_programs",
             filters={
                 "trainer_id": f"eq.{trainer_id}",
                 "program_id": f"eq.{program_id}",
             },
+        )
+        clear_schedule_caches()
+        cache_manager.clear_pattern("trainer_schedule:.*")
+
+        await broadcast_schedule_update(
+            {
+                "event_type": "assignment_deleted",
+                "trainer_id": trainer_id,
+                "program_id": program_id,
+            }
         )
 
         return {
@@ -375,7 +411,3 @@ async def delete_trainer_program_assignment(trainer_id: int, program_id: int):
         }
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc

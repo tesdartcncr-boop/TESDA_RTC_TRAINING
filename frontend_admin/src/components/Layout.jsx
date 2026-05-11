@@ -1,77 +1,82 @@
 import React from 'react'
-import { Outlet, Link, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
+import { BarChart3, Briefcase, Home, LogOut, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { 
-  Users, 
-  BookOpen, 
-  Home, 
-  CalendarDays,
-  MailCheck,
-  LogOut, 
-  Menu,
-  X
-} from 'lucide-react'
 
-const Layout = () => {
+const adminNavigation = [
+  { name: 'Dashboard', href: '/dashboard', icon: Home },
+  { name: 'Trainer', href: '/trainers', icon: Users },
+  { name: 'Program', href: '/programs', icon: Briefcase },
+  { name: 'Admin Accounts', href: '/admin-accounts', icon: ShieldCheck },
+  { name: 'Statistics', href: '/statistics', icon: BarChart3 },
+]
+
+const supervisorNavigation = [
+  { name: 'Dashboard', href: '/dashboard', icon: Home },
+  { name: 'Teaching Loads', href: '/teaching-loads', icon: Briefcase },
+  { name: 'Supervisor Accounts', href: '/admin-accounts?role=supervisor', icon: Settings },
+  { name: 'Statistics', href: '/statistics', icon: BarChart3 },
+]
+
+export default function Layout() {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
 
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: Home },
-    { name: 'Trainers', href: '/trainers', icon: Users },
-    { name: 'Programs', href: '/programs', icon: BookOpen },
-    { name: 'Schedules', href: '/schedules', icon: CalendarDays },
-    { name: 'Authorized Emails', href: '/authorized-emails', icon: MailCheck },
-  ]
+  const navigation = user?.user_type === 'admin' ? adminNavigation : supervisorNavigation
+  const portalName = user?.user_type === 'admin' ? 'Admin Portal' : 'Supervisor Portal'
+  const roleLabel = user?.user_type === 'admin' ? 'Administrator' : 'Supervisor'
 
-  const isActive = (href) => location.pathname === href
+  const isActive = (href) => {
+    const normalizedHref = href.split('?')[0]
+    return location.pathname === normalizedHref
+  }
+
+  const renderNav = (onNavigate) => (
+    <nav className="flex-1 space-y-2 px-4 py-6">
+      {navigation.map((item) => (
+        <Link
+          key={item.name}
+          to={item.href}
+          onClick={onNavigate}
+          className={`flex items-center rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+            isActive(item.href)
+              ? 'bg-gradient-to-r from-sky-600 to-cyan-500 text-white shadow-lg shadow-sky-900/25'
+              : 'text-slate-200 hover:bg-white/10'
+          }`}
+        >
+          <item.icon className="mr-3 h-5 w-5" />
+          {item.name}
+        </Link>
+      ))}
+    </nav>
+  )
 
   return (
-    <div className="relative h-screen flex overflow-hidden bg-slate-950">
+    <div className="relative flex min-h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-10 left-1/4 h-72 w-72 rounded-full bg-indigo-400/20 blur-3xl" />
-        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-sky-500/20 blur-3xl" />
+        <div className="absolute -top-16 left-1/3 h-72 w-72 rounded-full bg-sky-500/25 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-cyan-400/15 blur-3xl" />
       </div>
-      {/* Mobile sidebar */}
+
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
-        <button
-          type="button"
-          className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-          aria-label="Close sidebar overlay"
-        />
-        <div className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-white/10 bg-slate-900/95 text-slate-100 backdrop-blur-md">
-          <div className="flex items-center justify-between h-16 px-6 border-b border-white/10">
-            <h2 className="text-xl font-semibold text-white">Admin Portal</h2>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="text-slate-400 hover:text-white"
-            >
-              <X className="h-6 w-6" />
+        <button type="button" className="absolute inset-0 bg-slate-950/80" onClick={() => setSidebarOpen(false)} />
+        <div className="absolute inset-y-0 left-0 flex w-72 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur">
+          <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-200">TESDA RTC NCR</p>
+              <h2 className="mt-1 text-xl font-bold text-white">{portalName}</h2>
+            </div>
+            <button type="button" onClick={() => setSidebarOpen(false)} className="rounded-xl border border-white/10 p-2 text-slate-300">
+              <X className="h-5 w-5" />
             </button>
           </div>
-          <nav className="flex-1 px-4 py-6 space-y-2">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={`flex items-center px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                  isActive(item.href)
-                    ? 'bg-gradient-to-r from-indigo-500 to-sky-500 text-white shadow-lg shadow-indigo-900/30'
-                    : 'text-slate-200 hover:bg-white/10'
-                }`}
-                onClick={() => setSidebarOpen(false)}
-              >
-                <item.icon className="mr-3 h-5 w-5" />
-                {item.name}
-              </Link>
-            ))}
-          </nav>
+          {renderNav(() => setSidebarOpen(false))}
           <div className="border-t border-white/10 p-4">
             <button
+              type="button"
               onClick={logout}
-              className="flex items-center w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
+              className="flex w-full items-center rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
             >
               <LogOut className="mr-3 h-5 w-5" />
               Logout
@@ -80,77 +85,46 @@ const Layout = () => {
         </div>
       </div>
 
-      {/* Desktop sidebar */}
-      <div className="hidden lg:fixed lg:inset-y-0 lg:z-30 lg:flex lg:w-64 lg:flex-col">
-        <div className="flex flex-col h-full border-r border-white/10 bg-slate-900/95 text-slate-100 backdrop-blur-md">
-            <div className="flex items-center h-16 px-6 border-b border-white/10">
-              <h2 className="text-xl font-semibold text-white">Admin Portal</h2>
-            </div>
-            <nav className="flex-1 px-4 py-6 space-y-2">
-              {navigation.map((item) => (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={`flex items-center px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive(item.href)
-                      ? 'bg-gradient-to-r from-indigo-500 to-sky-500 text-white shadow-lg shadow-indigo-900/30'
-                      : 'text-slate-200 hover:bg-white/10'
-                  }`}
-                >
-                  <item.icon className="mr-3 h-5 w-5" />
-                  {item.name}
-                </Link>
-              ))}
-            </nav>
-            <div className="border-t border-white/10 p-4">
-              <div className="flex items-center mb-4">
-                <div className="flex-shrink-0">
-                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-sky-600 flex items-center justify-center">
-                    <span className="text-white text-sm font-medium">
-                      {user?.username?.charAt(0) || 'A'}
-                    </span>
-                  </div>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-white">{user?.username}</p>
-                  <p className="text-xs text-slate-300">Administrator</p>
-                </div>
-              </div>
-              <button
-                onClick={logout}
-                className="flex items-center w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
-              >
-                <LogOut className="mr-3 h-5 w-5" />
-                Logout
-              </button>
-            </div>
-          </div>
-      </div>
-
-      {/* Main content */}
-      <div className="relative z-0 flex flex-col flex-1 min-w-0 lg:pl-64">
-        <div className="lg:hidden">
-          <div className="flex items-center justify-between h-16 px-4 bg-white/80 backdrop-blur-md">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="text-slate-600 hover:text-slate-900"
-            >
-              <Menu className="h-6 w-6" />
-            </button>
-            <h1 className="text-lg font-semibold text-slate-900">Admin Portal</h1>
-            <div className="w-6" />
-          </div>
+      <aside className="hidden lg:flex lg:w-80 lg:flex-col lg:border-r lg:border-white/10 lg:bg-slate-900/90 lg:backdrop-blur">
+        <div className="border-b border-white/10 px-6 py-6">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-200">TESDA RTC NCR</p>
+          <h1 className="mt-2 text-2xl font-bold text-white">{portalName}</h1>
+          <p className="mt-2 text-sm text-slate-300">Trainer and teaching load management</p>
         </div>
-        <main className="flex-1 relative overflow-y-auto bg-gradient-to-br from-slate-100 via-indigo-50 to-sky-100/70 focus:outline-none">
-          <div className="py-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <Outlet />
-            </div>
+        {renderNav()}
+        <div className="border-t border-white/10 p-5">
+          <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{roleLabel}</p>
+            <p className="mt-2 text-lg font-semibold text-white">{user?.full_name || user?.username}</p>
+            <p className="text-sm text-slate-300">{user?.email}</p>
           </div>
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10"
+          >
+            <LogOut className="mr-3 h-5 w-5" />
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col lg:max-h-screen">
+        <header className="flex items-center justify-between border-b border-slate-200/70 bg-white/85 px-4 py-4 text-slate-900 backdrop-blur lg:hidden">
+          <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-slate-200 p-2">
+            <Menu className="h-5 w-5" />
+          </button>
+          <div className="text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sky-700">TESDA RTC NCR</p>
+            <h2 className="text-sm font-bold">{portalName}</h2>
+          </div>
+          <div className="w-9" />
+        </header>
+
+        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-100 via-sky-50 to-cyan-100/70 px-4 py-6 sm:px-6 lg:px-10">
+          <Outlet />
         </main>
       </div>
     </div>
   )
 }
-
-export default Layout

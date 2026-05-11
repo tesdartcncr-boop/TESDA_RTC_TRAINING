@@ -1,6 +1,9 @@
 -- Wipe all Supabase contents for this project.
 -- Run with care: this drops the tables and removes all data.
 
+DROP TABLE IF EXISTS schedules CASCADE;
+DROP TABLE IF EXISTS trainer_programs CASCADE;
+DROP TABLE IF EXISTS trainer_qualifications CASCADE;
 DROP TABLE IF EXISTS notifications CASCADE;
 DROP TABLE IF EXISTS otp_verifications CASCADE;
 DROP TABLE IF EXISTS verified_admin_emails CASCADE;

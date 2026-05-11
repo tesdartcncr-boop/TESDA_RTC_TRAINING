@@ -14,7 +14,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from ..schemas import LoginRequest, OTPRequest, OTPVerify, Token, TrainerResponse, UserResponse
+from ..schemas import (
+    LoginRequest,
+    OTPRequest,
+    OTPVerify,
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    Token,
+    TrainerResponse,
+    UserResponse,
+)
 from ..supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, update_row
 
 env_path = Path(__file__).resolve().parents[1] / ".env"
@@ -24,9 +33,10 @@ router = APIRouter()
 security = HTTPBearer()
 logger = logging.getLogger(__name__)
 
-# Supabase filter constants
 FILTER_FALSE = "eq.false"
 FILTER_TRUE = "eq.true"
+OTP_PURPOSE_ADMIN_LOGIN = "admin_login"
+OTP_PURPOSE_PASSWORD_RESET = "password_reset"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -44,7 +54,7 @@ def _prehash_password(password: str) -> bytes:
     return hashlib.sha256(password.encode("utf-8")).hexdigest().encode("utf-8")
 
 
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password: str, hashed_password: str | bytes | None) -> bool:
     if not hashed_password:
         return False
 
@@ -70,12 +80,11 @@ def verify_password(plain_password, hashed_password):
     return False
 
 
-def get_password_hash(password):
+def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(_prehash_password(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def generate_internal_password() -> str:
-    # Keep the generated placeholder short and stable for bcrypt-based schemes.
     return secrets.token_hex(16)
 
 
@@ -83,7 +92,7 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
@@ -115,7 +124,7 @@ def send_otp_email(email: str, otp_code: str):
         return False, "Unable to send OTP email. Please try again."
 
 
-def generate_otp():
+def generate_otp() -> str:
     return str(random.randint(100000, 999999))
 
 
@@ -147,6 +156,75 @@ def build_unique_username(email: str) -> str:
         suffix += 1
 
     return username
+
+
+def serialize_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user["email"],
+        "full_name": user.get("full_name"),
+        "user_type": user["user_type"],
+        "is_active": user.get("is_active", True),
+        "created_at": user.get("created_at"),
+    }
+
+
+def _delete_pending_otps(email: str, purpose: str):
+    delete_rows(
+        "otp_verifications",
+        filters={
+            "email": f"eq.{email}",
+            "purpose": f"eq.{purpose}",
+            "is_verified": FILTER_FALSE,
+        },
+        returning="minimal",
+    )
+
+
+def _create_otp_record(email: str, otp_code: str, purpose: str):
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    return insert_row(
+        "otp_verifications",
+        {
+            "email": email,
+            "purpose": purpose,
+            "otp_code": otp_code,
+            "is_verified": False,
+            "expires_at": expires_at,
+        },
+    )
+
+
+def _cleanup_unsent_otp(email: str, otp_code: str, purpose: str):
+    try:
+        delete_rows(
+            "otp_verifications",
+            filters={
+                "email": f"eq.{email}",
+                "purpose": f"eq.{purpose}",
+                "otp_code": f"eq.{otp_code}",
+                "is_verified": FILTER_FALSE,
+            },
+            returning="minimal",
+        )
+    except SupabaseAPIError:
+        logger.warning("Failed to clean up unsent OTP for %s", email)
+
+
+def _select_valid_otp(email: str, otp_code: str, purpose: str):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return select_one(
+        "otp_verifications",
+        filters={
+            "email": f"eq.{email}",
+            "purpose": f"eq.{purpose}",
+            "otp_code": f"eq.{otp_code}",
+            "is_verified": FILTER_FALSE,
+            "expires_at": f"gt.{now_iso}",
+        },
+        order="id.desc",
+    )
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -205,7 +283,87 @@ async def login(login_data: LoginRequest):
         data={"sub": user["username"], "user_type": user["user_type"]},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": serialize_user(user),
+    }
+
+
+@router.post("/password-reset/request")
+async def request_password_reset(payload: PasswordResetRequest):
+    normalized_email = normalize_email(payload.email)
+
+    try:
+        user = get_user_by_email(normalized_email)
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    if not user or user.get("is_active") is False:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this email address.",
+        )
+
+    otp_code = generate_otp()
+    try:
+        _delete_pending_otps(normalized_email, OTP_PURPOSE_PASSWORD_RESET)
+        _create_otp_record(normalized_email, otp_code, OTP_PURPOSE_PASSWORD_RESET)
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    email_sent, error_message = send_otp_email(normalized_email, otp_code)
+    if email_sent:
+        return {"message": "OTP sent successfully"}
+
+    _cleanup_unsent_otp(normalized_email, otp_code, OTP_PURPOSE_PASSWORD_RESET)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=error_message or "Failed to send OTP",
+    )
+
+
+@router.post("/password-reset/confirm")
+async def confirm_password_reset(payload: PasswordResetConfirm):
+    normalized_email = normalize_email(payload.email)
+
+    try:
+        user = get_user_by_email(normalized_email)
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    if not user or user.get("is_active") is False:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this email address.",
+        )
+
+    try:
+        otp_record = _select_valid_otp(normalized_email, payload.otp_code, OTP_PURPOSE_PASSWORD_RESET)
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    if not otp_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
+
+    try:
+        update_row(
+            "users",
+            {"password_hash": get_password_hash(payload.new_password)},
+            filters={"id": f"eq.{user['id']}"},
+        )
+        update_row(
+            "otp_verifications",
+            {"is_verified": True},
+            filters={"id": f"eq.{otp_record['id']}"},
+        )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    return {"message": "Password reset successful"}
 
 
 @router.post("/send-otp")
@@ -224,26 +382,9 @@ async def send_otp(otp_request: OTPRequest):
         )
 
     otp_code = generate_otp()
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
-
     try:
-        delete_rows(
-            "otp_verifications",
-            filters={
-                "email": f"eq.{normalized_email}",
-                "is_verified": FILTER_FALSE,
-            },
-            returning="minimal",
-        )
-        insert_row(
-            "otp_verifications",
-            {
-                "email": normalized_email,
-                "otp_code": otp_code,
-                "is_verified": False,
-                "expires_at": expires_at,
-            },
-        )
+        _delete_pending_otps(normalized_email, OTP_PURPOSE_ADMIN_LOGIN)
+        _create_otp_record(normalized_email, otp_code, OTP_PURPOSE_ADMIN_LOGIN)
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -251,19 +392,7 @@ async def send_otp(otp_request: OTPRequest):
     if email_sent:
         return {"message": "OTP sent successfully"}
 
-    try:
-        delete_rows(
-            "otp_verifications",
-            filters={
-                "email": f"eq.{normalized_email}",
-                "otp_code": f"eq.{otp_code}",
-                "is_verified": FILTER_FALSE,
-            },
-            returning="minimal",
-        )
-    except SupabaseAPIError:
-        logger.warning("Failed to clean up unsent OTP for %s", normalized_email)
-
+    _cleanup_unsent_otp(normalized_email, otp_code, OTP_PURPOSE_ADMIN_LOGIN)
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=error_message or "Failed to send OTP",
@@ -285,19 +414,8 @@ async def verify_otp(otp_verify: OTPVerify):
             detail="Email is not authorized for admin access",
         )
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-
     try:
-        otp_record = select_one(
-            "otp_verifications",
-            filters={
-                "email": f"eq.{normalized_email}",
-                "otp_code": f"eq.{otp_verify.otp_code}",
-                "is_verified": FILTER_FALSE,
-                "expires_at": f"gt.{now_iso}",
-            },
-            order="id.desc",
-        )
+        otp_record = _select_valid_otp(normalized_email, otp_verify.otp_code, OTP_PURPOSE_ADMIN_LOGIN)
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -325,6 +443,7 @@ async def verify_otp(otp_verify: OTPVerify):
                 {
                     "username": build_unique_username(normalized_email),
                     "email": normalized_email,
+                    "full_name": "OTP Admin",
                     "password_hash": get_password_hash(generate_internal_password()),
                     "user_type": "admin",
                     "is_active": True,
@@ -356,18 +475,13 @@ async def verify_otp(otp_verify: OTPVerify):
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "id": admin_user["id"],
-            "username": admin_user["username"],
-            "email": admin_user["email"],
-            "user_type": admin_user["user_type"],
-        },
+        "user": serialize_user(admin_user),
     }
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: CurrentUser):
-    return current_user
+    return serialize_user(current_user)
 
 
 @router.get("/trainer/me", response_model=TrainerResponse)

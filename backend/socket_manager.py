@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=["http://localhost:3000", "http://localhost:3001"],
+    cors_allowed_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002"],
     logger=True,
     engineio_logger=True,
 )
@@ -72,23 +72,26 @@ async def broadcast_program_update(program_data):
 
 async def broadcast_schedule_update(schedule_data):
     try:
-        # Broadcast schedule updates to all connected admin users
-        admin_users = select_rows(
+        management_users = select_rows(
             "users",
             filters={
-                "user_type": "eq.admin",
+                "user_type": "in.(admin,supervisor)",
                 "is_active": "eq.true",
             },
             select="id",
         )
     except SupabaseAPIError as exc:
-        logger.error("Failed to load admin users for schedule broadcast: %s", exc.message)
+        logger.error("Failed to load management users for schedule broadcast: %s", exc.message)
         return
 
-    admin_ids = {admin["id"] for admin in admin_users}
+    management_ids = {user["id"] for user in management_users}
+    target_trainer_id = schedule_data.get("trainer_id")
     for sid, registered_user_id in connected_users.items():
         try:
-            if int(registered_user_id) in admin_ids:
+            registered_user_id = int(registered_user_id)
+            if registered_user_id in management_ids or (
+                target_trainer_id is not None and registered_user_id == int(target_trainer_id)
+            ):
                 await sio.emit("schedule_update", schedule_data, room=sid)
         except Exception:
             # ignore
@@ -97,19 +100,19 @@ async def broadcast_schedule_update(schedule_data):
 
 async def broadcast_trainer_update(trainer_data):
     try:
-        admin_users = select_rows(
+        management_users = select_rows(
             "users",
             filters={
-                "user_type": "eq.admin",
+                "user_type": "in.(admin,supervisor)",
                 "is_active": "eq.true",
             },
             select="id",
         )
     except SupabaseAPIError as exc:
-        logger.error("Failed to load admin users for socket broadcast: %s", exc.message)
+        logger.error("Failed to load management users for socket broadcast: %s", exc.message)
         return
 
-    admin_ids = {admin["id"] for admin in admin_users}
+    management_ids = {user["id"] for user in management_users}
     for sid, registered_user_id in connected_users.items():
-        if int(registered_user_id) in admin_ids:
+        if int(registered_user_id) in management_ids:
             await sio.emit("trainer_update", trainer_data, room=sid)

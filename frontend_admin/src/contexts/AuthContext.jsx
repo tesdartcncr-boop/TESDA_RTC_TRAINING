@@ -1,9 +1,12 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
 
 const AuthContext = createContext()
+const API_BASE = 'http://localhost:5000'
+const PERSISTENT_TOKEN_KEY = 'management_token'
+const SESSION_TOKEN_KEY = 'management_session_token'
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
@@ -13,65 +16,84 @@ export const useAuth = () => {
   return context
 }
 
+const getStoredToken = () => {
+  return localStorage.getItem(PERSISTENT_TOKEN_KEY) || sessionStorage.getItem(SESSION_TOKEN_KEY)
+}
+
+const clearStoredToken = () => {
+  localStorage.removeItem(PERSISTENT_TOKEN_KEY)
+  sessionStorage.removeItem(SESSION_TOKEN_KEY)
+}
+
+const storeToken = (token, rememberMe) => {
+  clearStoredToken()
+  if (rememberMe) {
+    localStorage.setItem(PERSISTENT_TOKEN_KEY, token)
+    return
+  }
+  sessionStorage.setItem(SESSION_TOKEN_KEY, token)
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const token = localStorage.getItem('admin_token')
-    if (token) {
-      try {
-        // Decode token directly to restore session immediately
-        const decoded = jwtDecode(token)
-        // Check if token is still valid
-        if (decoded.exp && decoded.exp * 1000 > Date.now()) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-          // Set user object with correct shape - map 'sub' to 'username'
-          setUser({
-            username: decoded.sub,
-            user_type: decoded.user_type
-          })
-          // Try to fetch full user info in background (optional, doesn't remove token on failure)
-          fetchUser()
-        } else {
-          // Token expired
-          localStorage.removeItem('admin_token')
-          delete axios.defaults.headers.common['Authorization']
-        }
-      } catch (error) {
-        console.error('Failed to decode token:', error)
-        localStorage.removeItem('admin_token')
-        delete axios.defaults.headers.common['Authorization']
-        setLoading(false)
-      }
-    } else {
-      setLoading(false)
-    }
-  }, [])
-
   const fetchUser = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/auth/me')
-      // Update with full user data if backend call succeeds
+      const response = await axios.get(`${API_BASE}/api/auth/me`)
+      if (!['admin', 'supervisor'].includes(response.data.user_type)) {
+        clearStoredToken()
+        delete axios.defaults.headers.common.Authorization
+        setUser(null)
+        return
+      }
       setUser(response.data)
-      setLoading(false)
     } catch (error) {
-      console.error('Failed to fetch user:', error)
-      // DON'T remove token - it might just be a temporary backend issue
+      clearStoredToken()
+      delete axios.defaults.headers.common.Authorization
+      setUser(null)
+    } finally {
       setLoading(false)
     }
   }
 
-  const login = async (credentials) => {
+  useEffect(() => {
+    const token = getStoredToken()
+    if (!token) {
+      setLoading(false)
+      return
+    }
+
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', credentials)
-      const { access_token, user } = response.data
-      
-      localStorage.setItem('admin_token', access_token)
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
-      setUser(user || null)
-      
-      toast.success('Login successful')
+      const decoded = jwtDecode(token)
+      if (!decoded.exp || decoded.exp * 1000 <= Date.now()) {
+        clearStoredToken()
+        setLoading(false)
+        return
+      }
+      axios.defaults.headers.common.Authorization = `Bearer ${token}`
+      fetchUser()
+    } catch (error) {
+      clearStoredToken()
+      delete axios.defaults.headers.common.Authorization
+      setLoading(false)
+    }
+  }, [])
+
+  const login = async (credentials, rememberMe) => {
+    try {
+      const response = await axios.post(`${API_BASE}/api/auth/login`, credentials)
+      const { access_token: accessToken, user: nextUser } = response.data
+
+      if (!['admin', 'supervisor'].includes(nextUser?.user_type)) {
+        toast.error('Use the trainer portal for trainer accounts.')
+        return { success: false, error: 'Use the trainer portal for trainer accounts.' }
+      }
+
+      storeToken(accessToken, rememberMe)
+      axios.defaults.headers.common.Authorization = `Bearer ${accessToken}`
+      setUser(nextUser)
+      toast.success(`Welcome, ${nextUser.full_name || nextUser.username}`)
       return { success: true }
     } catch (error) {
       const message = error.response?.data?.detail || 'Login failed'
@@ -81,15 +103,15 @@ export const AuthProvider = ({ children }) => {
   }
 
   const logout = () => {
-    localStorage.removeItem('admin_token')
-    delete axios.defaults.headers.common['Authorization']
+    clearStoredToken()
+    delete axios.defaults.headers.common.Authorization
     setUser(null)
     toast.success('Logged out successfully')
   }
 
-  const sendOTP = async (email) => {
+  const requestPasswordReset = async (email) => {
     try {
-      await axios.post('http://localhost:5000/api/auth/send-otp', { email })
+      await axios.post(`${API_BASE}/api/auth/password-reset/request`, { email })
       toast.success('OTP sent to your email')
       return { success: true }
     } catch (error) {
@@ -99,38 +121,32 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  const verifyOTP = async (email, otpCode) => {
+  const confirmPasswordReset = async (email, otpCode, newPassword) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/verify-otp', { email, otp_code: otpCode })
-      const { access_token, user } = response.data
-      
-      localStorage.setItem('admin_token', access_token)
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
-      setUser(user)
-      
-      toast.success('Login successful')
+      await axios.post(`${API_BASE}/api/auth/password-reset/confirm`, {
+        email,
+        otp_code: otpCode,
+        new_password: newPassword,
+      })
+      toast.success('Password updated successfully')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'OTP verification failed'
+      const message = error.response?.data?.detail || 'Failed to reset password'
       toast.error(message)
       return { success: false, error: message }
     }
   }
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     loading,
-    isAuthenticated: !!user,
+    isAuthenticated: Boolean(user),
     login,
     logout,
-    sendOTP,
-    verifyOTP,
-    fetchUser
-  }
+    fetchUser,
+    requestPasswordReset,
+    confirmPasswordReset,
+  }), [user, loading])
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

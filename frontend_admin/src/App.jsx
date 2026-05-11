@@ -1,54 +1,88 @@
-import React, { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import React from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
-import { connectSocket, registerUser } from './utils/socket'
+import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Trainers from './pages/Trainers'
 import Programs from './pages/Programs'
 import Schedules from './pages/Schedules'
-import AuthorizedEmails from './pages/AuthorizedEmails'
-import Layout from './components/Layout'
+import AdminAccounts from './pages/AdminAccounts'
+import Statistics from './pages/Statistics'
 
-function App() {
-  const { isAuthenticated, loading, user } = useAuth()
-
-  useEffect(() => {
-    connectSocket()
-  }, [])
-
-  useEffect(() => {
-    if (isAuthenticated && user?.id) {
-      registerUser(user.id)
-    }
-  }, [isAuthenticated, user])
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth()
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-sky-400" />
+      </div>
+    )
+  }
+
+  return isAuthenticated ? children : <Navigate to="/login" replace />
+}
+
+function RoleGate({ allow, children }) {
+  const { user } = useAuth()
+  return allow.includes(user?.user_type) ? children : <Navigate to="/dashboard" replace />
+}
+
+function App() {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-sky-400" />
       </div>
     )
   }
 
   return (
     <Routes>
-      <Route 
-        path="/login" 
-        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />} 
-      />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
+
       <Route
         path="/"
-        element={isAuthenticated ? <Layout /> : <Navigate to="/login" />}
+        element={(
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        )}
       >
-        <Route index element={<Navigate to="dashboard" />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="trainers" element={<Trainers />} />
-        <Route path="programs" element={<Programs />} />
-        <Route path="schedules" element={<Schedules />} />
-        <Route path="authorized-emails" element={<AuthorizedEmails />} />
+        <Route path="teaching-loads" element={<Schedules />} />
+        <Route
+          path="trainers"
+          element={(
+            <RoleGate allow={['admin']}>
+              <Trainers />
+            </RoleGate>
+          )}
+        />
+        <Route
+          path="programs"
+          element={(
+            <RoleGate allow={['admin']}>
+              <Programs />
+            </RoleGate>
+          )}
+        />
+        <Route
+          path="admin-accounts"
+          element={(
+            <RoleGate allow={['admin', 'supervisor']}>
+              <AdminAccounts />
+            </RoleGate>
+          )}
+        />
+        <Route path="statistics" element={<Statistics />} />
       </Route>
-      <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
+
+      <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
     </Routes>
   )
 }
