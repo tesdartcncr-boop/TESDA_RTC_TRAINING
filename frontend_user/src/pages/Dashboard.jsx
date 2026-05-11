@@ -21,7 +21,8 @@ export default function Dashboard() {
       }
 
       try {
-        const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: user.id })
+        const trainerId = user.trainer_id || user.id
+        const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
         const cached = cacheManager.get(cacheKey)
         if (cached !== null) {
           const cachedLoads = Array.isArray(cached) ? cached : []
@@ -31,7 +32,7 @@ export default function Dashboard() {
           return
         }
 
-        const response = await fetch(`${API_BASE}/api/schedules/trainer/${user.id}/programs`, {
+        const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         })
         const data = await response.json()
@@ -47,7 +48,7 @@ export default function Dashboard() {
       }
     }
     loadTeachingLoads()
-  }, [user?.id])
+  }, [user?.id, user?.trainer_id])
 
   const totalHours = teachingLoads.reduce((sum, load) => sum + (load.program_total_hours || 0), 0)
   const totalDays = teachingLoads.reduce((sum, load) => sum + (load.program_days || 0), 0)
@@ -91,7 +92,7 @@ export default function Dashboard() {
 
         <div>
           {selectedLoad && (
-            <TrainerScheduleView program={selectedLoad} trainerId={user.id} />
+            <TrainerScheduleView program={selectedLoad} trainerId={user.trainer_id || user.id} />
           )}
         </div>
       </div>

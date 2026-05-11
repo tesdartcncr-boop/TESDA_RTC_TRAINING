@@ -41,6 +41,7 @@ OTP_PURPOSE_PASSWORD_RESET = "password_reset"
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+REMEMBER_ME_EXPIRE_DAYS = int(os.getenv("REMEMBER_ME_EXPIRE_DAYS", "30"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 OTP_EMAIL_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "send_otp_email.js"
 
@@ -279,10 +280,12 @@ async def login(login_data: LoginRequest):
             detail="Account is deactivated",
         )
 
+    token_expiry = timedelta(days=REMEMBER_ME_EXPIRE_DAYS) if login_data.remember_me else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user["username"], "user_type": user["user_type"]},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        expires_delta=token_expiry,
     )
+    logger.info("User logged in: %s, remember_me: %s, expiry: %s", user["username"], login_data.remember_me, token_expiry)
     return {
         "access_token": access_token,
         "token_type": "bearer",

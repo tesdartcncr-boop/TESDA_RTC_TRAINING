@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       const trainerResponse = await axios.get(`${API_BASE}/api/auth/trainer/me`)
-      setUser({ ...userResponse.data, ...trainerResponse.data })
+      setUser({ ...userResponse.data, ...trainerResponse.data, trainer_id: trainerResponse.data.id })
     } catch (error) {
       clearStoredToken()
       delete axios.defaults.headers.common.Authorization
@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials, rememberMe) => {
     try {
-      const { data } = await axios.post(`${API_BASE}/api/auth/login`, credentials)
+      const { data } = await axios.post(`${API_BASE}/api/auth/login`, { ...credentials, remember_me: rememberMe })
       if (data.user?.user_type !== 'trainer') {
         toast.error('Use the management portal for admin or supervisor accounts.')
         return { success: false, error: 'Use the management portal for admin or supervisor accounts.' }
@@ -93,7 +93,7 @@ export const AuthProvider = ({ children }) => {
       axios.defaults.headers.common.Authorization = `Bearer ${data.access_token}`
 
       const trainerResponse = await axios.get(`${API_BASE}/api/auth/trainer/me`)
-      setUser({ ...data.user, ...trainerResponse.data })
+      setUser({ ...data.user, ...trainerResponse.data, trainer_id: trainerResponse.data.id })
       toast.success('Login successful')
       return { success: true }
     } catch (error) {

@@ -16,6 +16,7 @@ env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -84,6 +85,7 @@ def supabase_request(
         raise SupabaseAPIError(500, "Supabase environment variables are not configured.")
 
     request_method = method.upper()
+    start_time = time.time()
 
     for attempt in range(MAX_REQUEST_RETRIES + 1):
         url = _build_url(path, params)
@@ -99,6 +101,10 @@ def supabase_request(
             with urlopen(request, timeout=30) as response:
                 raw_body = response.read().decode("utf-8")
                 parsed_body = json.loads(raw_body) if raw_body else None
+                elapsed = time.time() - start_time
+                logger.info("DB Request: %s %s - %.3fs", request_method, path, elapsed)
+                if elapsed > 1.0:
+                    logger.warning("SLOW DB Request: %s %s took %.3fs", request_method, path, elapsed)
                 return parsed_body, response.headers
         except HTTPError as exc:
             raw_body = exc.read().decode("utf-8", errors="replace")

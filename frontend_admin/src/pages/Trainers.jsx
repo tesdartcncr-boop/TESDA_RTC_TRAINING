@@ -199,7 +199,6 @@ export default function Trainers() {
   }
 
   const invalidateTrainerCaches = () => {
-    cacheManager.clearPattern('trainers_list:')
     cacheManager.clearPattern('trainer_qualifications:')
     cacheManager.clearPattern('stats_')
   }
@@ -207,21 +206,12 @@ export default function Trainers() {
   const loadTrainers = async () => {
     setLoading(true)
     try {
-      const cacheKey = cacheManager.generateKey('trainers_list', { search: searchTerm || null })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setTrainers(cached)
-        setLoading(false)
-        return
-      }
-
       const response = await fetch(`${API_BASE}/api/trainers/?skip=0&limit=100&search=${encodeURIComponent(searchTerm)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
       const nextTrainers = data.data || []
       setTrainers(nextTrainers)
-      cacheManager.set(cacheKey, nextTrainers)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load trainers')
@@ -321,6 +311,7 @@ export default function Trainers() {
       createForm.reset(emptyTrainerValues)
       setCreateQualifications([])
       setShowCreateModal(false)
+      loadTrainers()
       loadTrainers()
     } catch (error) {
       toast.error(error.message)
@@ -427,7 +418,6 @@ export default function Trainers() {
       toast.success('Trainer updated successfully')
       invalidateTrainerCaches()
       setEditingTrainer(null)
-      loadTrainers()
     } catch (error) {
       toast.error(error.message)
     }
@@ -446,7 +436,6 @@ export default function Trainers() {
       }
       toast.success('Trainer deleted successfully')
       invalidateTrainerCaches()
-      loadTrainers()
     } catch (error) {
       toast.error(error.message)
     }

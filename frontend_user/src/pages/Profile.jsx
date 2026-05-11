@@ -29,13 +29,14 @@ export default function Profile() {
   useEffect(() => {
     const loadQualifications = async () => {
       if (!user?.id) return
-      const cacheKey = cacheManager.generateKey('trainer_qualifications', { trainer_id: user.id })
+      const trainerId = user.trainer_id || user.id
+      const cacheKey = cacheManager.generateKey('trainer_qualifications', { trainer_id: trainerId })
       const cached = cacheManager.get(cacheKey)
       if (cached !== null) {
         setQualifications(cached)
         return
       }
-      const response = await fetch(`${API_BASE}/api/trainers/${user.id}/qualifications`, {
+      const response = await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
@@ -44,7 +45,7 @@ export default function Profile() {
       cacheManager.set(cacheKey, nextQualifications)
     }
     loadQualifications()
-  }, [user?.id])
+  }, [user?.id, user?.trainer_id])
 
   const handleSave = async (values) => {
     setIsLoading(true)

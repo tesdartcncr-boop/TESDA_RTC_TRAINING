@@ -85,7 +85,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials, rememberMe) => {
     try {
-      const response = await axios.post(`${API_BASE}/api/auth/login`, credentials)
+      const response = await axios.post(`${API_BASE}/api/auth/login`, { ...credentials, remember_me: rememberMe })
       const { access_token: accessToken, user: nextUser } = response.data
 
       if (nextUser?.user_type !== 'supervisor') {
