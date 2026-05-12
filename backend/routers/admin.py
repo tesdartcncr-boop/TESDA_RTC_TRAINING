@@ -108,6 +108,88 @@ async def get_statistics_overview(current_user: CurrentUser):
     }
 
 
+@router.get("/statistics/teaching-loads-by-year")
+async def get_teaching_loads_by_year(current_user: CurrentUser, year: int | None = Query(None)):
+    ensure_management_role(current_user)
+
+    try:
+        # Get all teaching loads with creation date
+        teaching_loads = select_rows("trainer_programs", select="id,approval_status,created_at,batch")
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    # Filter by year if provided
+    if year:
+        filtered_loads = [
+            load for load in teaching_loads
+            if load.get("created_at") and load["created_at"][:4] == str(year)
+        ]
+    else:
+        filtered_loads = teaching_loads
+
+    # Group by year for overview
+    loads_by_year = {}
+    for load in teaching_loads:
+        if load.get("created_at"):
+            load_year = load["created_at"][:4]
+            if load_year not in loads_by_year:
+                loads_by_year[load_year] = {
+                    "total": 0,
+                    "for_approval": 0,
+                    "approved": 0,
+                    "rejected": 0
+                }
+            
+            loads_by_year[load_year]["total"] += 1
+            status = load.get("approval_status", "")
+            if status == "for approval":
+                loads_by_year[load_year]["for_approval"] += 1
+            elif status == "approved":
+                loads_by_year[load_year]["approved"] += 1
+            elif status == "rejected":
+                loads_by_year[load_year]["rejected"] += 1
+
+    # Calculate statistics for filtered loads
+    total_filtered = len(filtered_loads)
+    for_approval_filtered = sum(1 for load in filtered_loads if load.get("approval_status") == "for approval")
+    approved_filtered = sum(1 for load in filtered_loads if load.get("approval_status") == "approved")
+    rejected_filtered = sum(1 for load in filtered_loads if load.get("approval_status") == "rejected")
+
+    # Group by batch for detailed view
+    loads_by_batch = {}
+    for load in filtered_loads:
+        batch = load.get("batch", "No Batch")
+        if batch not in loads_by_batch:
+            loads_by_batch[batch] = {
+                "total": 0,
+                "for_approval": 0,
+                "approved": 0,
+                "rejected": 0
+            }
+        
+        loads_by_batch[batch]["total"] += 1
+        status = load.get("approval_status", "")
+        if status == "for approval":
+            loads_by_batch[batch]["for_approval"] += 1
+        elif status == "approved":
+            loads_by_batch[batch]["approved"] += 1
+        elif status == "rejected":
+            loads_by_batch[batch]["rejected"] += 1
+
+    return {
+        "year_filter": year,
+        "loads_by_year": loads_by_year,
+        "current_year_stats": {
+            "total": total_filtered,
+            "for_approval": for_approval_filtered,
+            "approved": approved_filtered,
+            "rejected": rejected_filtered
+        },
+        "loads_by_batch": loads_by_batch,
+        "available_years": sorted(set(key for key in loads_by_year.keys() if key.isdigit()))
+    }
+
+
 @router.get("/notifications", response_model=list[NotificationResponse])
 async def get_notifications(current_user: CurrentUser):
     try:
@@ -297,3 +379,441 @@ async def export_programs(current_user: CurrentUser):
         )
 
     return {"data": export_data}
+
+
+@router.get("/programs")
+async def get_programs(
+    page: int = Query(1, ge=1),
+    limit: int = Query(15, ge=1, le=100),
+    search: str = Query(""),
+    current_user: CurrentUser = None
+):
+    ensure_management_role(current_user)
+
+    try:
+        filters = {"is_active": FILTER_TRUE}
+        if search:
+            # Add search filter for program name or type
+            filters["or"] = f"(name.ilike.%{search}%,type.ilike.%{search}%)"
+        
+        # Get total count for pagination
+        total_count = count_rows("programs", filters=filters)
+        
+        # Calculate pagination
+        offset = (page - 1) * limit
+        total_pages = (total_count + limit - 1) // limit
+        
+        # Get paginated results
+        programs = select_rows(
+            "programs", 
+            filters=filters, 
+            order=ORDER_DESC,
+            limit=limit,
+            offset=offset
+        )
+        
+        return {
+            "data": programs,
+            "totalPages": total_pages,
+            "currentPage": page,
+            "totalCount": total_count
+        }
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/trainers")
+async def get_trainers(
+    page: int = Query(1, ge=1),
+    limit: int = Query(15, ge=1, le=100),
+    search: str = Query(""),
+    current_user: CurrentUser = None
+):
+    ensure_management_role(current_user)
+
+    try:
+        filters = {"is_active": FILTER_TRUE}
+        if search:
+            # Add search filter for trainer name or email
+            filters["or"] = f"(name.ilike.%{search}%,email.ilike.%{search}%)"
+        
+        # Get total count for pagination
+        total_count = count_rows("trainers", filters=filters)
+        
+        # Calculate pagination
+        offset = (page - 1) * limit
+        total_pages = (total_count + limit - 1) // limit
+        
+        # Get paginated results
+        trainers = select_rows(
+            "trainers", 
+            filters=filters, 
+            order="name.asc",
+            limit=limit,
+            offset=offset
+        )
+        
+        return {
+            "data": trainers,
+            "totalPages": total_pages,
+            "currentPage": page,
+            "totalCount": total_count
+        }
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/programs/{program_id}/teaching-loads")
+async def get_program_teaching_loads(program_id: int, current_user: CurrentUser):
+    ensure_management_role(current_user)
+
+    try:
+        # Get teaching loads for a specific program
+        teaching_loads = select_rows(
+            "trainer_programs",
+            filters={
+                "program_id": f"eq.{program_id}",
+                "approval_status": "eq.approved"
+            },
+            order="created_at.desc"
+        )
+        
+        # Enrich with program and trainer details
+        enriched_loads = []
+        for load in teaching_loads:
+            # Get program details
+            program = select_one("programs", filters={"id": f"eq.{load['program_id']}"})
+            # Get trainer details
+            trainer = select_one("trainers", filters={"id": f"eq.{load['trainer_id']}"})
+            
+            enriched_load = {
+                **load,
+                "program_name": program.get("name", "Unknown Program") if program else "Unknown Program",
+                "program_type": program.get("type", "") if program else "",
+                "trainer_name": trainer.get("name", "Unknown Trainer") if trainer else "Unknown Trainer",
+                "trainer_email": trainer.get("email", "") if trainer else ""
+            }
+            enriched_loads.append(enriched_load)
+        
+        return enriched_loads
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+# Messaging System Endpoints
+
+@router.get("/messages")
+async def get_messages(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: str = Query("all"),
+    current_user: CurrentUser = None
+):
+    # Allow both management roles and trainers to access their messages
+    if current_user.get("user_type") not in {"admin", "supervisor", "trainer"}:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        filters = {"is_deleted_by_recipient": "eq.false"}
+        if status != "all":
+            filters["status"] = f"eq.{status}"
+        
+        # For trainers, only show messages they sent
+        if current_user.get("user_type") == "trainer":
+            filters["sender_id"] = f"eq.{current_user['id']}"
+        else:
+            # For admins/supervisors, show messages they received
+            filters["recipient_id"] = f"eq.{current_user['id']}"
+        
+        # Get total count for pagination
+        total_count = count_rows("messages", filters=filters)
+        
+        # Calculate pagination
+        offset = (page - 1) * limit
+        total_pages = (total_count + limit - 1) // limit
+        
+        # Get paginated messages with sender/recipient info
+        messages = select_rows(
+            "messages",
+            filters=filters,
+            order="created_at.desc",
+            limit=limit,
+            offset=offset
+        )
+        
+        # Enrich with sender and recipient information
+        enriched_messages = []
+        for message in messages:
+            sender = select_one("users", filters={"id": f"eq.{message['sender_id']}"})
+            recipient = select_one("users", filters={"id": f"eq.{message['recipient_id']}"})
+            
+            enriched_message = {
+                **message,
+                "sender_name": sender.get("full_name", sender.get("username", "Unknown")) if sender else "Unknown",
+                "sender_username": sender.get("username", "") if sender else "",
+                "recipient_name": recipient.get("full_name", recipient.get("username", "Unknown")) if recipient else "Unknown",
+                "recipient_username": recipient.get("username", "") if recipient else ""
+            }
+            enriched_messages.append(enriched_message)
+        
+        return {
+            "data": enriched_messages,
+            "totalPages": total_pages,
+            "currentPage": page,
+            "totalCount": total_count
+        }
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/messages/{message_id}")
+async def get_message(message_id: int, current_user: CurrentUser):
+    ensure_management_role(current_user)
+    
+    try:
+        message = select_one(
+            "messages",
+            filters={
+                "id": f"eq.{message_id}",
+                "recipient_id": f"eq.{current_user['id']}",
+                "is_deleted_by_recipient": "eq.false"
+            }
+        )
+        
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        # Get sender info
+        sender = select_one("users", filters={"id": f"eq.{message['sender_id']}"})
+        
+        enriched_message = {
+            **message,
+            "sender_name": sender.get("full_name", "Unknown") if sender else "Unknown",
+            "sender_username": sender.get("username", "") if sender else ""
+        }
+        
+        # Mark as read if unread
+        if message["status"] == "unread":
+            update_row(
+                "messages",
+                filters={"id": f"eq.{message_id}"},
+                data={"status": "read", "read_at": utc_now_iso()}
+            )
+        
+        return enriched_message
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.post("/messages")
+async def send_message(
+    message_data: dict,
+    current_user: CurrentUser = None
+):
+    # Allow trainers to send messages to admins
+    if current_user.get("user_type") not in {"admin", "supervisor", "trainer"}:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        # Validate required fields
+        required_fields = ["recipient_id", "subject", "content"]
+        for field in required_fields:
+            if field not in message_data or not message_data[field]:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+        
+        # Validate recipient exists and is admin/supervisor
+        recipient = select_one(
+            "users",
+            filters={
+                "id": f"eq.{message_data['recipient_id']}",
+                "user_type": "in.(admin,supervisor)",
+                "is_active": "eq.true"
+            }
+        )
+        
+        if not recipient:
+            raise HTTPException(status_code=404, detail="Recipient not found or not accessible")
+        
+        # Create message
+        message = insert_row(
+            "messages",
+            data={
+                "sender_id": current_user["id"],
+                "recipient_id": message_data["recipient_id"],
+                "subject": message_data["subject"],
+                "content": message_data["content"],
+                "message_type": message_data.get("message_type", "issue"),
+                "priority": message_data.get("priority", "normal")
+            }
+        )
+        
+        # Enrich with sender and recipient info for response
+        enriched_message = {
+            **message,
+            "sender_name": current_user.get("full_name", current_user.get("username", "Unknown")),
+            "recipient_name": recipient.get("full_name", recipient.get("username", "Unknown"))
+        }
+        
+        return enriched_message
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.put("/messages/{message_id}/reply")
+async def reply_to_message(
+    message_id: int,
+    reply_data: dict,
+    current_user: CurrentUser = None
+):
+    ensure_management_role(current_user)
+    
+    try:
+        # Check if original message exists and user is recipient
+        original_message = select_one(
+            "messages",
+            filters={
+                "id": f"eq.{message_id}",
+                "recipient_id": f"eq.{current_user['id']}",
+                "is_deleted_by_recipient": "eq.false"
+            }
+        )
+        
+        if not original_message:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        # Create reply message
+        reply_message = insert_row(
+            "messages",
+            data={
+                "sender_id": current_user["id"],
+                "recipient_id": original_message["sender_id"],
+                "subject": f"Re: {original_message['subject']}",
+                "content": reply_data["content"],
+                "message_type": "other",
+                "priority": "normal",
+                "reply_to_id": message_id
+            }
+        )
+        
+        # Update original message status
+        update_row(
+            "messages",
+            filters={"id": f"eq.{message_id}"},
+            data={"status": "replied"}
+        )
+        
+        return reply_message
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.put("/messages/{message_id}/status")
+async def update_message_status(
+    message_id: int,
+    status_data: dict,
+    current_user: CurrentUser = None
+):
+    ensure_management_role(current_user)
+    
+    try:
+        message = select_one(
+            "messages",
+            filters={
+                "id": f"eq.{message_id}",
+                "recipient_id": f"eq.{current_user['id']}",
+                "is_deleted_by_recipient": "eq.false"
+            }
+        )
+        
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        update_data = {}
+        if "status" in status_data:
+            update_data["status"] = status_data["status"]
+            if status_data["status"] == "read":
+                update_data["read_at"] = utc_now_iso()
+        
+        updated_message = update_row(
+            "messages",
+            filters={"id": f"eq.{message_id}"},
+            data=update_data
+        )
+        
+        return updated_message
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.delete("/messages/{message_id}")
+async def delete_message(message_id: int, current_user: CurrentUser):
+    ensure_management_role(current_user)
+    
+    try:
+        message = select_one(
+            "messages",
+            filters={
+                "id": f"eq.{message_id}",
+                "recipient_id": f"eq.{current_user['id']}"
+            }
+        )
+        
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        # Soft delete (mark as deleted by recipient)
+        update_row(
+            "messages",
+            filters={"id": f"eq.{message_id}"},
+            data={"is_deleted_by_recipient": True}
+        )
+        
+        return {"message": "Message deleted successfully"}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/messages/unread-count")
+async def get_unread_message_count(current_user: CurrentUser):
+    # Allow both management roles and trainers to access their unread count
+    if current_user.get("user_type") not in {"admin", "supervisor", "trainer"}:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        filters = {
+            "status": "eq.unread",
+            "is_deleted_by_recipient": "eq.false"
+        }
+        
+        # For trainers, count messages they sent that have been read by admin
+        if current_user.get("user_type") == "trainer":
+            # Trainers don't have unread messages since they only send
+            return {"count": 0}
+        else:
+            # For admins/supervisors, count messages they received
+            filters["recipient_id"] = f"eq.{current_user['id']}"
+        
+        count = count_rows("messages", filters=filters)
+        
+        return {"count": count}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/admin-users")
+async def get_admin_users(current_user: CurrentUser):
+    ensure_management_role(current_user)
+    
+    try:
+        admins = select_rows(
+            "users",
+            filters={
+                "user_type": "in.(admin,supervisor)",
+                "is_active": "eq.true"
+            },
+            order="full_name.asc"
+        )
+        
+        return admins
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)

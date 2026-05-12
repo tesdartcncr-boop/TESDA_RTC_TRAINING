@@ -6,16 +6,19 @@ import {
   Home, 
   LogOut, 
   Menu,
-  X
+  X,
+  Mail
 } from 'lucide-react'
 
 const Layout = () => {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
+    { name: 'Messages', href: '/messages', icon: Mail },
     { name: 'Profile', href: '/profile', icon: User },
   ]
 
@@ -75,7 +78,7 @@ const Layout = () => {
       </div>
 
       {/* Desktop sidebar */}
-      <div className="hidden lg:fixed lg:inset-y-0 lg:z-30 lg:flex lg:w-64 lg:flex-col">
+      <div className={`hidden lg:fixed lg:inset-y-0 lg:z-30 lg:flex lg:w-64 lg:flex-col ${sidebarCollapsed ? '!hidden' : ''}`}>
         <div className="flex flex-col h-full border-r border-white/10 bg-slate-900/95 text-slate-100 backdrop-blur-md">
             <div className="flex items-center h-16 px-6 border-b border-white/10">
               <h2 className="text-xl font-semibold text-white">Trainer Portal</h2>
@@ -122,18 +125,22 @@ const Layout = () => {
       </div>
 
       {/* Main content */}
-      <div className="relative z-0 flex flex-col flex-1 min-w-0 lg:pl-64">
-        <div className="lg:hidden">
-          <div className="flex items-center justify-between h-16 px-4 bg-white/80 backdrop-blur-md">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="text-slate-600 hover:text-slate-900"
-            >
-              <Menu className="h-6 w-6" />
-            </button>
-            <h1 className="text-lg font-semibold text-slate-900">Trainer Portal</h1>
-            <div className="w-6" />
-          </div>
+      <div className={`relative z-0 flex flex-col flex-1 min-w-0 ${sidebarCollapsed ? '' : 'lg:pl-64'}`}>
+        <div className="flex items-center justify-between h-16 px-4 bg-white/80 backdrop-blur-md border-b border-slate-200">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="text-slate-600 hover:text-slate-900 lg:hidden"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="text-slate-600 hover:text-slate-900 rounded-xl border border-slate-200 p-2 hover:bg-slate-50 hidden lg:flex"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <h1 className="text-lg font-semibold text-slate-900 lg:flex-1 text-center">Trainer Portal</h1>
+          <div className="w-6 lg:hidden" />
         </div>
         <main className="flex-1 relative overflow-y-auto bg-gradient-to-br from-slate-100 via-cyan-50 to-blue-100/70 focus:outline-none">
           <div className="py-6">

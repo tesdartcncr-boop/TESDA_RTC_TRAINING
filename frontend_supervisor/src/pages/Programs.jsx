@@ -32,6 +32,7 @@ export default function Programs() {
       validity: '',
       hours: '',
       description: '',
+      recognition_number: '',
     },
   })
   const editForm = useForm()
@@ -97,6 +98,7 @@ export default function Programs() {
           validity: values.validity || null,
           hours: values.hours ? Number.parseInt(values.hours, 10) : null,
           description: values.description || null,
+          recognition_number: values.recognition_number || null,
         }),
       })
 
@@ -125,6 +127,7 @@ export default function Programs() {
       validity: program.validity || '',
       hours: program.hours || '',
       description: program.description || '',
+      recognition_number: program.recognition_number || '',
     })
   }
 
@@ -142,6 +145,7 @@ export default function Programs() {
           validity: values.validity || null,
           hours: values.hours ? Number.parseInt(values.hours, 10) : null,
           description: values.description || null,
+          recognition_number: values.recognition_number || null,
         }),
       })
       if (!response.ok) {
@@ -226,6 +230,7 @@ export default function Programs() {
                 </div>
               </div>
               <div className="mt-5 space-y-2 text-sm text-slate-600">
+                <p><span className="font-semibold text-slate-800">Recognition Number:</span> {program.recognition_number || 'Not set'}</p>
                 <p><span className="font-semibold text-slate-800">Validity:</span> {program.validity || 'Not set'}</p>
                 <p><span className="font-semibold text-slate-800">Hours:</span> {program.hours || 0}</p>
                 <p><span className="font-semibold text-slate-800">Weekday Days:</span> {program.days || 0}</p>
@@ -259,6 +264,10 @@ export default function Programs() {
               <label htmlFor="program_name" className="block text-sm font-semibold text-slate-700">Program Name</label>
               <input id="program_name" {...createForm.register('name', { required: 'Program name is required' })} className={`${fieldClassName} mt-2`} />
             </div>
+            <div className="md:col-span-2">
+              <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
+              <input id="program_recognition_number" {...createForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
+            </div>
             <div>
               <label htmlFor="program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>
               <select id="program_type" {...createForm.register('type')} className={`${fieldClassName} mt-2`}>
@@ -291,6 +300,10 @@ export default function Programs() {
             <div className="md:col-span-2">
               <label htmlFor="edit_program_name" className="block text-sm font-semibold text-slate-700">Program Name</label>
               <input id="edit_program_name" {...editForm.register('name', { required: true })} className={`${fieldClassName} mt-2`} />
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="edit_program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
+              <input id="edit_program_recognition_number" {...editForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
             </div>
             <div>
               <label htmlFor="edit_program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>

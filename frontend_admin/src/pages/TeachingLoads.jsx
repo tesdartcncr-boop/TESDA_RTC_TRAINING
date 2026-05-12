@@ -1,0 +1,671 @@
+import React, { useEffect, useState, useMemo, useCallback } from 'react'
+import { Search, Users, CalendarDays, BookOpen, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import ModalShell from '../components/ModalShell'
+import { cacheManager } from '../utils/cacheManager'
+
+const API_BASE = 'http://localhost:5000'
+const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
+const PAGE_SIZE = 15
+
+export default function TeachingLoads() {
+  const { user } = useAuth()
+  const [programs, setPrograms] = useState([])
+  const [trainers, setTrainers] = useState([])
+  const [teachingLoads, setTeachingLoads] = useState([])
+  const [selectedProgram, setSelectedProgram] = useState(null)
+  const [selectedTrainer, setSelectedTrainer] = useState(null)
+  const [selectedLoad, setSelectedLoad] = useState(null)
+  const [viewMode, setViewMode] = useState('programs') // 'programs' or 'trainers'
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [programPage, setProgramPage] = useState(1)
+  const [trainerPage, setTrainerPage] = useState(1)
+  const [programTotalPages, setProgramTotalPages] = useState(0)
+  const [trainerTotalPages, setTrainerTotalPages] = useState(0)
+  const [expandedItems, setExpandedItems] = useState(new Set())
+
+  // Load programs with pagination
+  const loadPrograms = useCallback(async (page = 1, search = '') => {
+    try {
+      const cacheKey = cacheManager.generateKey('teaching_loads_programs', { page, search })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setPrograms(cached.data)
+        setProgramTotalPages(cached.totalPages)
+        return
+      }
+
+      const response = await fetch(`${API_BASE}/api/programs?page=${page}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      setPrograms(data.data || [])
+      setProgramTotalPages(data.totalPages || 0)
+      cacheManager.set(cacheKey, { data: data.data || [], totalPages: data.totalPages || 0 }, 300000) // 5 minutes
+    } catch (error) {
+      console.error('Failed to load programs:', error)
+      setPrograms([])
+    }
+  }, [])
+
+  // Load trainers with pagination
+  const loadTrainers = useCallback(async (page = 1, search = '') => {
+    try {
+      const cacheKey = cacheManager.generateKey('teaching_loads_trainers', { page, search })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setTrainers(cached.data)
+        setTrainerTotalPages(cached.totalPages)
+        return
+      }
+
+      const response = await fetch(`${API_BASE}/api/trainers?page=${page}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      setTrainers(data.data || [])
+      setTrainerTotalPages(data.totalPages || 0)
+      cacheManager.set(cacheKey, { data: data.data || [], totalPages: data.totalPages || 0 }, 300000)
+    } catch (error) {
+      console.error('Failed to load trainers:', error)
+      setTrainers([])
+    }
+  }, [])
+
+  // Load teaching loads for a program
+  const loadProgramTeachingLoads = useCallback(async (programId) => {
+    try {
+      const cacheKey = cacheManager.generateKey('program_teaching_loads', { program_id: programId })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setTeachingLoads(cached)
+        return
+      }
+
+      const response = await fetch(`${API_BASE}/api/programs/${programId}/teaching-loads`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      setTeachingLoads(Array.isArray(data) ? data : [])
+      cacheManager.set(cacheKey, Array.isArray(data) ? data : [], 300000)
+    } catch (error) {
+      console.error('Failed to load program teaching loads:', error)
+      setTeachingLoads([])
+    }
+  }, [])
+
+  // Load teaching loads for a trainer
+  const loadTrainerTeachingLoads = useCallback(async (trainerId) => {
+    try {
+      const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setTeachingLoads(cached)
+        return
+      }
+
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      setTeachingLoads(Array.isArray(data) ? data : [])
+      cacheManager.set(cacheKey, Array.isArray(data) ? data : [], 300000)
+    } catch (error) {
+      console.error('Failed to load trainer teaching loads:', error)
+      setTeachingLoads([])
+    }
+  }, [])
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true)
+      await Promise.all([
+        loadPrograms(1, ''),
+        loadTrainers(1, '')
+      ])
+      setLoading(false)
+    }
+    loadData()
+  }, [loadPrograms, loadTrainers])
+
+  // Search handlers
+  useEffect(() => {
+    if (viewMode === 'programs') {
+      setProgramPage(1)
+      loadPrograms(1, searchTerm)
+    } else {
+      setTrainerPage(1)
+      loadTrainers(1, searchTerm)
+    }
+  }, [searchTerm, viewMode, loadPrograms, loadTrainers])
+
+  // Pagination handlers
+  const handleProgramPageChange = (newPage) => {
+    setProgramPage(newPage)
+    loadPrograms(newPage, searchTerm)
+  }
+
+  const handleTrainerPageChange = (newPage) => {
+    setTrainerPage(newPage)
+    loadTrainers(newPage, searchTerm)
+  }
+
+  // Toggle expanded state
+  const toggleExpanded = (id) => {
+    const newExpanded = new Set(expandedItems)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedItems(newExpanded)
+  }
+
+  // Program selection handler
+  const handleProgramSelect = async (program) => {
+    setSelectedProgram(program)
+    setSelectedTrainer(null)
+    setTeachingLoads([])
+    await loadProgramTeachingLoads(program.id)
+    toggleExpanded(program.id)
+  }
+
+  // Trainer selection handler
+  const handleTrainerSelect = async (trainer) => {
+    setSelectedTrainer(trainer)
+    setSelectedProgram(null)
+    setTeachingLoads([])
+    await loadTrainerTeachingLoads(trainer.id)
+    toggleExpanded(trainer.id)
+  }
+
+  // Filter data based on search term
+  const filteredPrograms = useMemo(() => {
+    if (!searchTerm) return programs
+    return programs.filter(program => 
+      (program.name && program.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (program.type && program.type.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  }, [programs, searchTerm])
+
+  const filteredTrainers = useMemo(() => {
+    if (!searchTerm) return trainers
+    return trainers.filter(trainer => 
+      (trainer.name && trainer.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (trainer.email && trainer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  }, [trainers, searchTerm])
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
+        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
+        <h1 className="mt-4 text-4xl font-black">Teaching Loads</h1>
+        <p className="mt-3 max-w-2xl text-cyan-50/90">
+          View and manage approved teaching loads across all programs and trainers.
+        </p>
+      </section>
+
+      {/* Controls */}
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setViewMode('programs')}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                viewMode === 'programs'
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <BookOpen className="mr-2 h-4 w-4 inline" />
+              Programs
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('trainers')}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                viewMode === 'trainers'
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <Users className="mr-2 h-4 w-4 inline" />
+              Trainers
+            </button>
+          </div>
+          
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder={`Search ${viewMode === 'programs' ? 'programs' : 'trainers'}...`}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100 lg:w-80"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Content */}
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        {loading ? (
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">
+            Loading teaching loads...
+          </div>
+        ) : viewMode === 'programs' ? (
+          <ProgramsView
+            programs={filteredPrograms}
+            selectedProgram={selectedProgram}
+            teachingLoads={teachingLoads}
+            expandedItems={expandedItems}
+            onProgramSelect={handleProgramSelect}
+            onLoadSelect={setSelectedLoad}
+            toggleExpanded={toggleExpanded}
+            currentPage={programPage}
+            totalPages={programTotalPages}
+            onPageChange={handleProgramPageChange}
+          />
+        ) : (
+          <TrainersView
+            trainers={filteredTrainers}
+            selectedTrainer={selectedTrainer}
+            teachingLoads={teachingLoads}
+            expandedItems={expandedItems}
+            onTrainerSelect={handleTrainerSelect}
+            onLoadSelect={setSelectedLoad}
+            toggleExpanded={toggleExpanded}
+            currentPage={trainerPage}
+            totalPages={trainerTotalPages}
+            onPageChange={handleTrainerPageChange}
+          />
+        )}
+      </section>
+
+      {/* Calendar Modal */}
+      {selectedLoad && (
+        <ModalShell
+          title={`${selectedLoad.program_name} - ${selectedLoad.trainer_name}`}
+          onClose={() => setSelectedLoad(null)}
+          maxWidth="max-w-6xl"
+        >
+          <ReadOnlyCalendarView teachingLoad={selectedLoad} />
+        </ModalShell>
+      )}
+    </div>
+  )
+}
+
+// Programs View Component
+function ProgramsView({
+  programs,
+  selectedProgram,
+  teachingLoads,
+  expandedItems,
+  onProgramSelect,
+  onLoadSelect,
+  toggleExpanded,
+  currentPage,
+  totalPages,
+  onPageChange
+}) {
+  return (
+    <div className="space-y-4">
+      {programs.length === 0 ? (
+        <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
+          No programs found.
+        </div>
+      ) : (
+        programs.map((program) => (
+          <div key={program.id} className="rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+            <button
+              type="button"
+              onClick={() => onProgramSelect(program)}
+              className="w-full p-4 text-left transition hover:bg-slate-50"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">{program.name}</h3>
+                  <p className="text-sm text-slate-600">{program.type} • {program.hours || 0} hours</p>
+                  <p className="text-xs text-slate-500 mt-1">Recognition: {program.recognition_number || 'Not set'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
+                    {teachingLoads.filter(load => load.program_id === program.id).length} trainers
+                  </span>
+                  {expandedItems.has(program.id) ? (
+                    <ChevronUp className="h-5 w-5 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-slate-400" />
+                  )}
+                </div>
+              </div>
+            </button>
+            
+            {expandedItems.has(program.id) && selectedProgram?.id === program.id && (
+              <div className="border-t border-slate-200 p-4">
+                <h4 className="text-sm font-bold text-slate-700 mb-3">Assigned Trainers</h4>
+                {teachingLoads.length === 0 ? (
+                  <p className="text-sm text-slate-500">No teaching loads assigned to this program.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {teachingLoads
+                      .filter(load => load.program_id === program.id)
+                      .map((load) => (
+                        <div
+                          key={load.id}
+                          onClick={() => onLoadSelect(load)}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition hover:border-cyan-300 hover:bg-cyan-50"
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{load.trainer_name}</p>
+                            <p className="text-xs text-slate-600">{load.hours_per_day} hrs/day • {load.program_days} days</p>
+                          </div>
+                          <CalendarDays className="h-4 w-4 text-cyan-600" />
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+      
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-6">
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          <span className="flex items-center px-3 py-2 text-sm text-slate-600">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Trainers View Component
+function TrainersView({
+  trainers,
+  selectedTrainer,
+  teachingLoads,
+  expandedItems,
+  onTrainerSelect,
+  onLoadSelect,
+  toggleExpanded,
+  currentPage,
+  totalPages,
+  onPageChange
+}) {
+  return (
+    <div className="space-y-4">
+      {trainers.length === 0 ? (
+        <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
+          No trainers found.
+        </div>
+      ) : (
+        trainers.map((trainer) => (
+          <div key={trainer.id} className="rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+            <button
+              type="button"
+              onClick={() => onTrainerSelect(trainer)}
+              className="w-full p-4 text-left transition hover:bg-slate-50"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">{trainer.name}</h3>
+                  <p className="text-sm text-slate-600">{trainer.email}</p>
+                  <p className="text-xs text-slate-500 mt-1">TM Number: {trainer.tm_number || 'Not set'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
+                    {teachingLoads.filter(load => load.trainer_id === trainer.id).length} programs
+                  </span>
+                  {expandedItems.has(trainer.id) ? (
+                    <ChevronUp className="h-5 w-5 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-slate-400" />
+                  )}
+                </div>
+              </div>
+            </button>
+            
+            {expandedItems.has(trainer.id) && selectedTrainer?.id === trainer.id && (
+              <div className="border-t border-slate-200 p-4">
+                <h4 className="text-sm font-bold text-slate-700 mb-3">Assigned Programs</h4>
+                {teachingLoads.length === 0 ? (
+                  <p className="text-sm text-slate-500">No teaching loads assigned to this trainer.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {teachingLoads
+                      .filter(load => load.trainer_id === trainer.id)
+                      .map((load) => (
+                        <div
+                          key={load.id}
+                          onClick={() => onLoadSelect(load)}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition hover:border-cyan-300 hover:bg-cyan-50"
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{load.program_name}</p>
+                            <p className="text-xs text-slate-600">{load.program_type} • {load.hours_per_day} hrs/day</p>
+                          </div>
+                          <CalendarDays className="h-4 w-4 text-cyan-600" />
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+      
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-6">
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          <span className="flex items-center px-3 py-2 text-sm text-slate-600">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Read-Only Calendar View Component
+function ReadOnlyCalendarView({ teachingLoad }) {
+  const [scheduleDays, setScheduleDays] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadSchedule = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/schedules/trainer/${teachingLoad.trainer_id}/program/${teachingLoad.program_id}/schedule`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        })
+        const data = await response.json()
+        setScheduleDays(Array.isArray(data) ? data : [])
+      } catch (error) {
+        console.error('Failed to load schedule:', error)
+        setScheduleDays([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadSchedule()
+  }, [teachingLoad])
+
+  const STATUS_OPTIONS = [
+    { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
+    { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
+    { key: 'leave', label: 'Leave', color: 'bg-sky-500' },
+    { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
+    { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
+  ]
+
+  // Helper function to generate calendar weeks
+  const generateCalendarWeeks = (totalDays) => {
+    const weeks = []
+    let currentDay = 1
+    
+    while (currentDay <= totalDays) {
+      const week = []
+      
+      // Add Monday to Friday (work days)
+      for (let i = 0; i < 5; i++) {
+        if (currentDay <= totalDays) {
+          week.push({
+            dayNumber: currentDay,
+            dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i],
+            isWeekend: false
+          })
+          currentDay++
+        } else {
+          week.push(null)
+        }
+      }
+      
+      // Add Saturday and Sunday (weekend)
+      for (let i = 0; i < 2; i++) {
+        week.push({
+          dayNumber: null,
+          dayName: ['Sat', 'Sun'][i],
+          isWeekend: true
+        })
+      }
+      
+      weeks.push(week)
+    }
+    
+    return weeks
+  }
+
+  const calendarDays = Math.max(teachingLoad.program_days || 0, scheduleDays.length)
+  const dayMap = useMemo(() => Object.fromEntries(scheduleDays.map((day) => [day.day_number, day])), [scheduleDays])
+
+  if (loading) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">
+        Loading calendar...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <CalendarDays className="h-6 w-6 text-cyan-600" />
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">{teachingLoad.program_name}</h3>
+          <p className="text-sm text-slate-600">{teachingLoad.program_type} • {teachingLoad.hours_per_day} hrs/day</p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[800px]">
+          {/* Calendar Header */}
+          <div className="grid grid-cols-7 gap-1 mb-2 border-b border-slate-200 pb-2">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+              <div key={day} className="text-center">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{day}</p>
+              </div>
+            ))}
+          </div>
+          
+          {/* Calendar Weeks */}
+          <div className="space-y-1">
+            {generateCalendarWeeks(calendarDays).map((week, weekIndex) => (
+              <div key={weekIndex} className="grid grid-cols-7 gap-1">
+                {week.map((day, dayIndex) => {
+                  if (day === null) {
+                    return (
+                      <div key={`empty-${dayIndex}`} className="aspect-square" />
+                    )
+                  }
+                  
+                  if (day.isWeekend) {
+                    return (
+                      <div key={`weekend-${dayIndex}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
+                        <p className="text-xs font-medium text-slate-400">{day.dayName}</p>
+                      </div>
+                    )
+                  }
+                  
+                  const entry = dayMap[day.dayNumber]
+                  const status = entry?.status
+                  const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+                  
+                  return (
+                    <div
+                      key={day.dayNumber}
+                      className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center"
+                    >
+                      <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
+                      <div className="mt-1 flex justify-center">
+                        <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
+                          {status ? status.charAt(0).toUpperCase() : day.dayNumber}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
+                        {status || 'open'}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Status Legend */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <h4 className="text-sm font-bold text-slate-900 mb-3">Status Legend</h4>
+        <div className="grid gap-2 md:grid-cols-5">
+          {STATUS_OPTIONS.map((option) => (
+            <div key={option.key} className="flex items-center gap-2">
+              <span className={`h-3 w-3 rounded-full ${option.color}`} />
+              <span className="text-xs font-semibold text-slate-700">{option.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -5,6 +5,7 @@ import { useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Schedules from './pages/Schedules'
+import TeachingLoads from './pages/TeachingLoads'
 import Statistics from './pages/Statistics'
 
 function ProtectedRoute({ children }) {
@@ -45,7 +46,8 @@ function App() {
         )}
       >
         <Route index element={<Navigate to="/teaching-loads" replace />} />
-        <Route path="teaching-loads" element={<Schedules />} />
+        <Route path="teaching-loads" element={<TeachingLoads />} />
+        <Route path="schedules" element={<Schedules />} />
         <Route path="statistics" element={<Statistics />} />
       </Route>
 

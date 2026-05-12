@@ -17,21 +17,45 @@ export const useAuth = () => {
 }
 
 const getStoredToken = () => {
-  return localStorage.getItem(PERSISTENT_TOKEN_KEY) || sessionStorage.getItem(SESSION_TOKEN_KEY)
+  // Try localStorage first (remember me)
+  const localToken = localStorage.getItem(PERSISTENT_TOKEN_KEY)
+  if (localToken) {
+    console.log('Using localStorage token (remember me)')
+    return localToken
+  }
+  
+  // Try sessionStorage (session only)
+  const sessionToken = sessionStorage.getItem(SESSION_TOKEN_KEY)
+  if (sessionToken) {
+    console.log('Using sessionStorage token (session only)')
+    return sessionToken
+  }
+  
+  console.log('No token found')
+  return null
 }
 
 const clearStoredToken = () => {
   localStorage.removeItem(PERSISTENT_TOKEN_KEY)
   sessionStorage.removeItem(SESSION_TOKEN_KEY)
+  // Clear any cookies as backup
+  document.cookie = `${PERSISTENT_TOKEN_KEY}=; max-age=0; path=/`
+  document.cookie = `${SESSION_TOKEN_KEY}=; max-age=0; path=/`
 }
 
 const storeToken = (token, rememberMe) => {
   clearStoredToken()
+  console.log('Storing token - rememberMe:', rememberMe)
+  
   if (rememberMe) {
+    // Store in localStorage for persistence
     localStorage.setItem(PERSISTENT_TOKEN_KEY, token)
-    return
+    console.log('Token stored in localStorage (remember me)')
+  } else {
+    // Store in sessionStorage for session only
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token)
+    console.log('Token stored in sessionStorage (session only)')
   }
-  sessionStorage.setItem(SESSION_TOKEN_KEY, token)
 }
 
 export const AuthProvider = ({ children }) => {
@@ -58,26 +82,39 @@ export const AuthProvider = ({ children }) => {
   }
 
   useEffect(() => {
-    const token = getStoredToken()
-    if (!token) {
-      setLoading(false)
-      return
-    }
-
-    try {
-      const decoded = jwtDecode(token)
-      if (!decoded.exp || decoded.exp * 1000 <= Date.now()) {
-        clearStoredToken()
+    const initializeAuth = async () => {
+      const token = getStoredToken()
+      if (!token) {
+        console.log('No token found during initialization')
         setLoading(false)
         return
       }
-      axios.defaults.headers.common.Authorization = `Bearer ${token}`
-      fetchUser()
-    } catch (error) {
-      clearStoredToken()
-      delete axios.defaults.headers.common.Authorization
-      setLoading(false)
+
+      try {
+        const decoded = jwtDecode(token)
+        const now = Date.now()
+        const exp = decoded.exp * 1000
+        console.log('Token validation - exp:', new Date(exp), 'now:', new Date(now), 'valid:', exp > now)
+        
+        if (!decoded.exp || exp <= now) {
+          console.log('Token expired or invalid, clearing stored tokens')
+          clearStoredToken()
+          setLoading(false)
+          return
+        }
+        
+        console.log('Token valid, setting up authorization and fetching user')
+        axios.defaults.headers.common.Authorization = `Bearer ${token}`
+        await fetchUser()
+      } catch (error) {
+        console.error('Token validation error:', error)
+        clearStoredToken()
+        delete axios.defaults.headers.common.Authorization
+        setLoading(false)
+      }
     }
+
+    initializeAuth()
   }, [])
 
   const login = async (credentials, rememberMe) => {

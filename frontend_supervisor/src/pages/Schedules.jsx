@@ -218,6 +218,8 @@ export default function Schedules() {
         const error = await response.json()
         throw new Error(error.detail || 'Failed to update approval')
       }
+      // Invalidate trainer's cache so they see the updated approval status
+      cacheManager.clearPattern('trainer_teaching_loads')
       toast.success(`Teaching load ${nextStatus}`)
       const data = await response.json()
       setSelectedAssignment(data)

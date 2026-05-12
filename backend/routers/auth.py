@@ -96,7 +96,8 @@ def normalize_email(email: str) -> str:
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire.timestamp()})
+    logger.info("Creating token with expiry: %s (timestamp: %s)", expire, expire.timestamp())
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 

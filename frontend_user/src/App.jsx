@@ -4,6 +4,7 @@ import { useAuth } from './contexts/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
+import Messages from './pages/Messages'
 import Layout from './components/Layout'
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
       />
       <Route element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/messages" element={<Messages />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

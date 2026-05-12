@@ -87,7 +87,44 @@ export default function TrainerScheduleView({ program, trainerId }) {
     }
   }
 
-  return (
+  // Helper function to generate calendar weeks
+const generateCalendarWeeks = (totalDays) => {
+  const weeks = []
+  let currentDay = 1
+  
+  while (currentDay <= totalDays) {
+    const week = []
+    
+    // Add Monday to Friday (work days)
+    for (let i = 0; i < 5; i++) {
+      if (currentDay <= totalDays) {
+        week.push({
+          dayNumber: currentDay,
+          dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i],
+          isWeekend: false
+        })
+        currentDay++
+      } else {
+        week.push(null)
+      }
+    }
+    
+    // Add Saturday and Sunday (weekend)
+    for (let i = 0; i < 2; i++) {
+      week.push({
+        dayNumber: null,
+        dayName: ['Sat', 'Sun'][i],
+        isWeekend: true
+      })
+    }
+    
+    weeks.push(week)
+  }
+  
+  return weeks
+}
+
+return (
     <div className="space-y-6">
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -108,29 +145,63 @@ export default function TrainerScheduleView({ program, trainerId }) {
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">Loading schedule...</div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-5">
-            {Array.from({ length: calendarDays }, (_, index) => index + 1).map((dayNumber) => {
-              const entry = dayMap[dayNumber]
-              const status = entry?.status
-              const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
-              return (
-                <button
-                  type="button"
-                  key={dayNumber}
-                  onClick={() => setSelectedDay(dayNumber)}
-                  className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center transition hover:border-cyan-300 hover:bg-cyan-50"
-                >
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Day {dayNumber}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-700">{entry?.schedule_date || 'Pending date'}</p>
-                  <div className="mt-4 flex justify-center">
-                    <span className={`inline-flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                      {status ? status.charAt(0).toUpperCase() : dayNumber}
-                    </span>
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px]">
+              {/* Calendar Header */}
+              <div className="grid grid-cols-7 gap-1 mb-2 border-b border-slate-200 pb-2">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                  <div key={day} className="text-center">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{day}</p>
                   </div>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{status || 'open'}</p>
-                </button>
-              )
-            })}
+                ))}
+              </div>
+              
+              {/* Calendar Weeks */}
+              <div className="space-y-1">
+                {generateCalendarWeeks(calendarDays).map((week, weekIndex) => (
+                  <div key={weekIndex} className="grid grid-cols-7 gap-1">
+                    {week.map((day, dayIndex) => {
+                      if (day === null) {
+                        return (
+                          <div key={`empty-${dayIndex}`} className="aspect-square" />
+                        )
+                      }
+                      
+                      if (day.isWeekend) {
+                        return (
+                          <div key={`weekend-${dayIndex}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
+                            <p className="text-xs font-medium text-slate-400">{day.dayName}</p>
+                          </div>
+                        )
+                      }
+                      
+                      const entry = dayMap[day.dayNumber]
+                      const status = entry?.status
+                      const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+                      
+                      return (
+                        <button
+                          type="button"
+                          key={day.dayNumber}
+                          onClick={() => setSelectedDay(day.dayNumber)}
+                          className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center transition-all hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm"
+                        >
+                          <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
+                          <div className="mt-1 flex justify-center">
+                            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
+                              {status ? status.charAt(0).toUpperCase() : day.dayNumber}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
+                            {status || 'open'}
+                          </p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </section>
@@ -150,7 +221,7 @@ export default function TrainerScheduleView({ program, trainerId }) {
       {selectedDay && (
         <ModalShell title={`Update Day ${selectedDay}`} onClose={() => setSelectedDay(null)} maxWidth="max-w-3xl">
           <p className="mb-4 text-sm text-slate-600">
-            Choose a status for this day. If the day is not marked complete, the system automatically adds another weekday at the end of the calendar.
+            Choose a status for this day. If day is not marked complete, the system automatically adds another weekday at the end of the calendar.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {STATUS_OPTIONS.map((option) => (

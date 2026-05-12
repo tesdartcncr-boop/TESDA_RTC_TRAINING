@@ -35,6 +35,7 @@ export default function Schedules() {
       program_id: '',
       hours_per_day: 8,
       schedule_date: '',
+      batch: '',
     },
   })
 
@@ -186,6 +187,7 @@ export default function Schedules() {
           program_id: Number.parseInt(values.program_id, 10),
           hours_per_day: Number.parseInt(values.hours_per_day, 10),
           schedule_date: values.schedule_date || null,
+          batch: values.batch || null,
         }),
       })
       if (!response.ok) {
@@ -201,6 +203,7 @@ export default function Schedules() {
         program_id: '',
         hours_per_day: 8,
         schedule_date: '',
+        batch: '',
       })
       setEligiblePrograms([])
       setShowCreateModal(false)
@@ -437,6 +440,10 @@ export default function Schedules() {
             <div>
               <label htmlFor="teaching_load_start_date" className="block text-sm font-semibold text-slate-700">Start Date</label>
               <input id="teaching_load_start_date" type="date" {...createForm.register('schedule_date')} className={`${fieldClassName} mt-2`} />
+            </div>
+            <div>
+              <label htmlFor="teaching_load_batch" className="block text-sm font-semibold text-slate-700">Batch</label>
+              <input id="teaching_load_batch" type="text" {...createForm.register('batch')} placeholder="yyyy-batch" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
               The calendar is generated automatically using weekdays only. New extra days are added when a day is marked absent, leave, suspended, or incomplete.

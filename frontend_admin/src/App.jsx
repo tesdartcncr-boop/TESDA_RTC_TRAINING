@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard'
 import Trainers from './pages/Trainers'
 import Programs from './pages/Programs'
 import Schedules from './pages/Schedules'
+import TeachingLoads from './pages/TeachingLoads'
+import Inbox from './pages/Inbox'
 import AdminAccounts from './pages/AdminAccounts'
 import Statistics from './pages/Statistics'
 
@@ -54,7 +56,9 @@ function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="teaching-loads" element={<Schedules />} />
+        <Route path="inbox" element={<Inbox />} />
+        <Route path="teaching-loads" element={<TeachingLoads />} />
+        <Route path="schedules" element={<Schedules />} />
         <Route
           path="trainers"
           element={(

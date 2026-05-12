@@ -187,6 +187,9 @@ ALTER TABLE IF EXISTS trainer_programs
 ADD COLUMN IF NOT EXISTS nttc_number VARCHAR(50);
 
 ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS batch VARCHAR(50);
+
+ALTER TABLE IF EXISTS trainer_programs
 DROP CONSTRAINT IF EXISTS trainer_programs_hours_per_day_check;
 
 ALTER TABLE IF EXISTS trainer_programs
@@ -221,6 +224,9 @@ ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
 ALTER TABLE IF EXISTS programs
 ADD COLUMN IF NOT EXISTS validity VARCHAR(100);
+
+ALTER TABLE IF EXISTS programs
+ADD COLUMN IF NOT EXISTS recognition_number VARCHAR(100);
 
 ALTER TABLE IF EXISTS programs
 DROP CONSTRAINT IF EXISTS programs_type_check;
@@ -306,3 +312,90 @@ ON CONFLICT (username) DO UPDATE
     SET trainer_name = EXCLUDED.trainer_name,
             is_active = EXCLUDED.is_active,
             updated_at = EXCLUDED.updated_at;
+
+-- Messaging System Tables
+CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    content TEXT NOT NULL,
+    message_type VARCHAR(20) DEFAULT 'issue' CHECK (message_type IN ('issue', 'inquiry', 'report', 'other')),
+    status VARCHAR(20) DEFAULT 'unread' CHECK (status IN ('unread', 'read', 'replied')),
+    priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP WITH TIME ZONE,
+    reply_to_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    is_deleted_by_sender BOOLEAN DEFAULT FALSE,
+    is_deleted_by_recipient BOOLEAN DEFAULT FALSE
+);
+
+-- Message attachments table
+CREATE TABLE IF NOT EXISTS message_attachments (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    mime_type TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Message notifications table
+CREATE TABLE IF NOT EXISTS message_notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE(user_id, message_id)
+);
+
+-- Indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_messages_recipient_status ON messages(recipient_id, status);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_created ON messages(sender_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(recipient_id, status) WHERE status = 'unread';
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON message_notifications(user_id, is_read) WHERE is_read = FALSE;
+
+-- Function to get unread message count for a user
+CREATE OR REPLACE FUNCTION get_unread_message_count(p_user_id INTEGER)
+RETURNS INTEGER AS $$
+BEGIN
+    RETURN (
+        SELECT COUNT(*)
+        FROM messages
+        WHERE recipient_id = p_user_id
+        AND status = 'unread'
+        AND is_deleted_by_recipient = FALSE
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to create message notification
+CREATE OR REPLACE FUNCTION create_message_notification(p_message_id INTEGER)
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO message_notifications (user_id, message_id)
+    SELECT recipient_id, p_message_id
+    FROM messages
+    WHERE id = p_message_id
+    ON CONFLICT (user_id, message_id) DO NOTHING;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to automatically create notifications for new messages
+CREATE OR REPLACE FUNCTION trigger_message_notification()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM create_message_notification(NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop existing trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_create_message_notification ON messages;
+CREATE TRIGGER trigger_create_message_notification
+    AFTER INSERT ON messages
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_message_notification();

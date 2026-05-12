@@ -187,6 +187,7 @@ class ProgramCreate(BaseModel):
     hours: Optional[int] = None
     schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
+    recognition_number: Optional[str] = None
 
 
 class ProgramUpdate(BaseModel):
@@ -198,6 +199,7 @@ class ProgramUpdate(BaseModel):
     schedule: Optional[str] = None
     days: Optional[int] = None
     is_active: Optional[bool] = None
+    recognition_number: Optional[str] = None
 
 
 class ProgramResponse(BaseModel):
@@ -210,6 +212,7 @@ class ProgramResponse(BaseModel):
     schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
     is_active: bool
+    recognition_number: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -221,6 +224,7 @@ class TeachingLoadCreate(BaseModel):
     hours_per_day: int = Field(default=8)
     nttc_number: Optional[str] = None
     schedule_date: Optional[date] = None
+    batch: Optional[str] = None
 
 
 class TeachingLoadApprovalUpdate(BaseModel):
@@ -240,6 +244,7 @@ class TeachingLoadResponse(BaseModel):
     approved_at: Optional[datetime] = None
     nttc_number: Optional[str] = None
     schedule_date: Optional[date] = None
+    batch: Optional[str] = None
     created_at: datetime
 
     class Config:
