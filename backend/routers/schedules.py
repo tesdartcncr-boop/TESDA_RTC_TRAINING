@@ -283,11 +283,27 @@ async def get_approval_queue(current_user: CurrentUser, approval_status: str | N
         if approval_status:
             filters["approval_status"] = f"eq.{approval_status}"
 
-        assignments = select_rows("trainer_programs", filters=filters, order="created_at.desc")
+        assignments = select_rows("trainer_programs", filters=filters, order="created_at.desc", select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,approved_by,approved_at,created_at")
+        
+        # Batch fetch trainers and programs
+        trainer_ids = {a['trainer_id'] for a in assignments}
+        program_ids = {a['program_id'] for a in assignments}
+        
+        trainers_map = {}
+        programs_map = {}
+        
+        if trainer_ids:
+            trainers = select_rows("trainers", filters={"id": f"in.({','.join(map(str, trainer_ids))})"}, select="id,user_id,username,trainer_name,is_active")
+            trainers_map = {t['id']: t for t in trainers}
+        
+        if program_ids:
+            programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type,hours,schedule,is_active")
+            programs_map = {p['id']: p for p in programs}
+        
         queue = []
         for assignment in assignments:
-            trainer = select_one("trainers", filters={"id": f"eq.{assignment['trainer_id']}"})
-            program = select_one("programs", filters={"id": f"eq.{assignment['program_id']}"})
+            trainer = trainers_map.get(assignment['trainer_id'])
+            program = programs_map.get(assignment['program_id'])
             if not trainer or not program:
                 continue
             synced_rows = sync_assignment_schedule(assignment, program)

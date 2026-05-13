@@ -7,13 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from socketio import ASGIApp
 
 try:
-    from .routers import auth, trainers, programs, admin, schedules
+    from .routers import auth, trainers, programs, admin, schedules, messages
     from .socket_manager import sio
 except ImportError:
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.routers import auth, trainers, programs, admin, schedules
+    from backend.routers import auth, trainers, programs, admin, schedules, messages
     from backend.socket_manager import sio
 
 @asynccontextmanager
@@ -52,6 +52,8 @@ fastapi_app.include_router(trainers.router, prefix="/api/trainers", tags=["train
 fastapi_app.include_router(programs.router, prefix="/api/programs", tags=["programs"])
 fastapi_app.include_router(schedules.router, prefix="/api/schedules", tags=["schedules"])
 fastapi_app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+fastapi_app.include_router(messages.router, prefix="/api/messages", tags=["messaging"])
+fastapi_app.include_router(messages.admin_router, tags=["messaging"])
 
 @fastapi_app.get("/")
 async def root():

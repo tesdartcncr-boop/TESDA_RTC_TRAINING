@@ -122,3 +122,41 @@ class VerifiedAdminEmail(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class Message(Base):
+    __tablename__ = "messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, nullable=False)  # Foreign key to users
+    recipient_id = Column(Integer, nullable=False)  # Foreign key to users
+    subject = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="issue")  # issue, inquiry, report, other
+    status = Column(String(20), default="unread")  # unread, read, replied
+    priority = Column(String(20), default="normal")  # low, normal, high, urgent
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True))
+    reply_to_id = Column(Integer)  # Foreign key to messages (for threading)
+    is_deleted_by_sender = Column(Boolean, default=False)
+    is_deleted_by_recipient = Column(Boolean, default=False)
+
+class MessageAttachment(Base):
+    __tablename__ = "message_attachments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, nullable=False)  # Foreign key to messages
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer)
+    mime_type = Column(String(100))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class MessageNotification(Base):
+    __tablename__ = "message_notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)  # Foreign key to users
+    message_id = Column(Integer, nullable=False)  # Foreign key to messages
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True))

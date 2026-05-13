@@ -1,5 +1,6 @@
 -- Messaging System Schema Migration
 -- Run this script to create the messaging tables
+-- NOTE: RLS policies removed - authorization is handled by the FastAPI backend
 
 -- Drop existing tables if they exist (for clean migration)
 DROP TABLE IF EXISTS message_notifications CASCADE;
@@ -95,67 +96,21 @@ CREATE TRIGGER trigger_create_message_notification
     FOR EACH ROW
     EXECUTE FUNCTION trigger_message_notification();
 
--- Grant permissions
-GRANT ALL ON messages TO authenticated;
-GRANT ALL ON message_attachments TO authenticated;
-GRANT ALL ON message_notifications TO authenticated;
-GRANT ALL ON SEQUENCE messages_id_seq TO authenticated;
-GRANT ALL ON SEQUENCE message_attachments_id_seq TO authenticated;
-GRANT ALL ON SEQUENCE message_notifications_id_seq TO authenticated;
-
--- Enable RLS (Row Level Security)
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE message_attachments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE message_notifications ENABLE ROW LEVEL SECURITY;
-
--- RLS Policies for messages
-CREATE POLICY "Users can view messages sent to them" ON messages
-    FOR SELECT USING (
-        auth.uid() = recipient_id OR 
-        auth.uid() = sender_id
-    );
-
-CREATE POLICY "Users can insert messages they send" ON messages
-    FOR INSERT WITH CHECK (auth.uid() = sender_id);
-
-CREATE POLICY "Users can update messages they receive" ON messages
-    FOR UPDATE USING (auth.uid() = recipient_id);
-
-CREATE POLICY "Users can delete messages they sent or received" ON messages
-    FOR DELETE USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
-
--- RLS Policies for message_attachments
-CREATE POLICY "Users can view attachments for their messages" ON message_attachments
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM messages 
-            WHERE messages.id = message_attachments.message_id
-            AND (auth.uid() = messages.recipient_id OR auth.uid() = messages.sender_id)
-        )
-    );
-
--- RLS Policies for message_notifications
-CREATE POLICY "Users can view their own notifications" ON message_notifications
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "System can insert notifications" ON message_notifications
-    FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Users can update their own notifications" ON message_notifications
-    FOR UPDATE USING (auth.uid() = user_id);
+-- Note: RLS (Row Level Security) is NOT enabled here
+-- Authorization is enforced by the FastAPI backend using get_current_user dependency
+-- This allows the schema to work with both local PostgreSQL and Supabase
 
 -- Sample data for testing (optional)
-INSERT INTO messages (sender_id, recipient_id, subject, content, message_type, priority)
-SELECT 
-    u1.id, 
-    u2.id, 
-    'Test Message from Trainer', 
-    'This is a test message from a trainer to an administrator.', 
-    'issue', 
-    'normal'
-FROM users u1, users u2
-WHERE u1.username = 'trainer1' 
-AND u2.user_type IN ('admin', 'supervisor')
-LIMIT 1;
-
-COMMIT;
+-- Uncomment the line below if you want to create a test message
+-- INSERT INTO messages (sender_id, recipient_id, subject, content, message_type, priority)
+-- SELECT 
+--     u1.id, 
+--     u2.id, 
+--     'Test Message from Trainer', 
+--     'This is a test message from a trainer to an administrator.', 
+--     'issue', 
+--     'normal'
+-- FROM users u1, users u2
+-- WHERE u1.username = 'trainer1' 
+-- AND u2.user_type IN ('admin', 'supervisor')
+-- LIMIT 1;

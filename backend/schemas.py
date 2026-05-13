@@ -309,3 +309,66 @@ class AccountUpdate(BaseModel):
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
+
+class MessageCreate(BaseModel):
+    recipient_id: int
+    subject: str
+    content: str
+    message_type: str = "issue"
+    priority: str = "normal"
+    reply_to_id: Optional[int] = None
+
+
+class MessageUpdate(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+
+
+class MessageResponse(BaseModel):
+    id: int
+    sender_id: int
+    recipient_id: int
+    subject: str
+    content: str
+    message_type: str
+    status: str
+    priority: str
+    created_at: datetime
+    read_at: Optional[datetime] = None
+    reply_to_id: Optional[int] = None
+    is_deleted_by_sender: bool = False
+    is_deleted_by_recipient: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class MessageAttachmentCreate(BaseModel):
+    filename: str
+    file_path: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+
+
+class MessageAttachmentResponse(BaseModel):
+    id: int
+    message_id: int
+    filename: str
+    file_path: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminUserResponse(BaseModel):
+    id: int
+    full_name: Optional[str] = None
+    user_type: str
+    email: str
+
+    class Config:
+        from_attributes = True
+

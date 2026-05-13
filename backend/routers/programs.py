@@ -45,8 +45,13 @@ async def get_programs(
     current_user: CurrentUser,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
+    page: int | None = Query(None, ge=1),
     search: str | None = Query(None),
 ):
+    # Support both page and skip parameters
+    if page is not None:
+        skip = (page - 1) * limit
+    
     cache_key = cache_manager.get_cache_key("programs", skip=skip, limit=limit, search=search)
     cached = cache_manager.get(cache_key)
     if cached:
@@ -54,27 +59,31 @@ async def get_programs(
 
     try:
         filters = {"is_active": FILTER_TRUE}
-        all_programs = select_rows("programs", filters=filters, order=ORDER_DESC)
-
+        
+        # Apply search filter at database level
         if search:
-            search_lower = search.lower()
-            all_programs = [
-                program for program in all_programs
-                if search_lower in (program.get("name") or "").lower()
-                or search_lower in (program.get("description") or "").lower()
-                or search_lower in (program.get("validity") or "").lower()
-            ]
-
-        total = len(all_programs)
-        programs = all_programs[skip:skip + limit]
+            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity.ilike.%{search}%)"
+        
+        # Fetch paginated results directly from database
+        programs = select_rows(
+            "programs",
+            filters=filters,
+            order=ORDER_DESC,
+            limit=limit,
+            offset=skip,
+            select="id,name,description,type,validity,hours,schedule,days,is_active,created_at"
+        )
+        
+        # Check if there are more results
+        has_more = len(programs) == limit
+        
         response = {
             "data": programs,
-            "total": total,
             "skip": skip,
             "limit": limit,
-            "has_more": (skip + limit) < total,
+            "has_more": has_more,
         }
-        cache_manager.set(cache_key, response)
+        cache_manager.set(cache_key, response, 300000)  # 5 min cache
         return response
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)

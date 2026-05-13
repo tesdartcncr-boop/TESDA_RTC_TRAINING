@@ -61,7 +61,7 @@ def _build_headers(prefer: Optional[list[str]] = None, extra_headers: Optional[d
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
         "Content-Type": "application/json",
-        "Connection": "close",
+        "Connection": "keep-alive",
     }
 
     if prefer:
@@ -160,6 +160,7 @@ def select_rows(
     select: str = "*",
     order: Optional[str] = None,
     limit: Optional[int] = None,
+    offset: Optional[int] = None,
 ):
     params = {"select": select}
     if filters:
@@ -168,8 +169,20 @@ def select_rows(
         params["order"] = order
     if limit is not None:
         params["limit"] = str(limit)
+    if offset is not None:
+        params["offset"] = str(offset)
 
-    data, _ = supabase_request("GET", f"/rest/v1/{table}", params=params)
+    data, headers = supabase_request("GET", f"/rest/v1/{table}", params=params)
+    
+    # Extract total count from Content-Range header if available
+    content_range = headers.get("Content-Range", "")
+    total_count = None
+    if "/" in content_range:
+        try:
+            total_count = int(content_range.rsplit("/", 1)[1])
+        except (ValueError, IndexError):
+            pass
+    
     return data or []
 
 

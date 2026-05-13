@@ -13,6 +13,7 @@ export default function Messages() {
   const [loading, setLoading] = useState(true)
   const [showComposeModal, setShowComposeModal] = useState(false)
   const [sentMessages, setSentMessages] = useState([])
+  const [receivedMessages, setReceivedMessages] = useState([])
   const [error, setError] = useState(null)
 
   // Ensure adminUsers is always an array
@@ -71,13 +72,6 @@ export default function Messages() {
     }
     
     try {
-      const cacheKey = cacheManager.generateKey('trainer_sent_messages', { trainer_id: user.id })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setSentMessages(cached)
-        return
-      }
-
       const response = await fetch(`${API_BASE}/api/messages`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
@@ -94,13 +88,18 @@ export default function Messages() {
       }
       const data = await response.json()
       
-      // Filter messages sent by this trainer
-      const trainerMessages = (data.data || []).filter(msg => msg.sender_id === user.id)
+      const allMessages = Array.isArray(data.data) ? data.data : []
+      const userId = String(user.id)
+
+      const trainerMessages = allMessages.filter((msg) => String(msg.sender_id) === userId)
+      const inboxMessages = allMessages.filter((msg) => String(msg.recipient_id) === userId)
+
       setSentMessages(trainerMessages)
-      cacheManager.set(cacheKey, trainerMessages, 300000) // 5 minutes cache
+      setReceivedMessages(inboxMessages)
     } catch (error) {
       console.error('Failed to load sent messages:', error)
       setSentMessages([])
+      setReceivedMessages([])
       // Don't set error for sent messages, just use empty state
     }
   }, [user?.id])
@@ -298,6 +297,53 @@ export default function Messages() {
       </section>
 
       {/* Sent Messages */}
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900 mb-4">Your Inbox</h2>
+        {loading ? (
+          <div className="text-center text-slate-500 py-4">Loading messages...</div>
+        ) : receivedMessages.length === 0 ? (
+          <div className="text-center text-slate-500 py-8">
+            <Mail className="mx-auto h-12 w-12 text-slate-400 mb-4" />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No incoming messages</h3>
+            <p>Administrators will reply here when they respond to your messages.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {receivedMessages.map((message) => (
+              <div key={message.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-semibold text-slate-900">{message.subject}</h3>
+                      <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(message.priority)}`}>
+                        {message.priority}
+                      </span>
+                      <div className="flex items-center gap-1 text-xs text-slate-500">
+                        {getStatusIcon(message.status)}
+                        <span className="capitalize">{message.status}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-2 whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>From: {message.sender_name || message.sender_username || 'Administrator'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>Received: {formatDate(message.created_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Your Sent Messages</h2>
         {loading ? (

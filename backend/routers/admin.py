@@ -396,27 +396,28 @@ async def get_programs(
             # Add search filter for program name or type
             filters["or"] = f"(name.ilike.%{search}%,type.ilike.%{search}%)"
         
-        # Get total count for pagination
-        total_count = count_rows("programs", filters=filters)
-        
         # Calculate pagination
         offset = (page - 1) * limit
-        total_pages = (total_count + limit - 1) // limit
         
-        # Get paginated results
+        # Get paginated results with count header
         programs = select_rows(
             "programs", 
             filters=filters, 
             order=ORDER_DESC,
             limit=limit,
-            offset=offset
+            offset=offset,
+            select="id,name,description,type,validity,hours,is_active,created_at"
         )
+        
+        # For now, estimate total based on whether we got fewer results than requested
+        # This avoids the extra count query. A proper solution would parse Content-Range header
+        has_more = len(programs) == limit
         
         return {
             "data": programs,
-            "totalPages": total_pages,
             "currentPage": page,
-            "totalCount": total_count
+            "pageSize": limit,
+            "hasMore": has_more
         }
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -435,29 +436,29 @@ async def get_trainers(
         filters = {"is_active": FILTER_TRUE}
         if search:
             # Add search filter for trainer name or email
-            filters["or"] = f"(name.ilike.%{search}%,email.ilike.%{search}%)"
-        
-        # Get total count for pagination
-        total_count = count_rows("trainers", filters=filters)
+            filters["or"] = f"(trainer_name.ilike.%{search}%,username.ilike.%{search}%)"
         
         # Calculate pagination
         offset = (page - 1) * limit
-        total_pages = (total_count + limit - 1) // limit
         
         # Get paginated results
         trainers = select_rows(
             "trainers", 
             filters=filters, 
-            order="name.asc",
+            order="trainer_name.asc",
             limit=limit,
-            offset=offset
+            offset=offset,
+            select="id,user_id,username,trainer_name,first_name,last_name,tm_number,tm_expiration,nttc_number,is_active,created_at"
         )
+        
+        # Check if there are more results
+        has_more = len(trainers) == limit
         
         return {
             "data": trainers,
-            "totalPages": total_pages,
             "currentPage": page,
-            "totalCount": total_count
+            "pageSize": limit,
+            "hasMore": has_more
         }
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -475,23 +476,37 @@ async def get_program_teaching_loads(program_id: int, current_user: CurrentUser)
                 "program_id": f"eq.{program_id}",
                 "approval_status": "eq.approved"
             },
-            order="created_at.desc"
+            order="created_at.desc",
+            select="id,trainer_id,program_id,hours_per_day,approval_status,created_at"
         )
+        
+        # Batch fetch programs and trainers instead of N+1 queries
+        program_ids = {load['program_id'] for load in teaching_loads}
+        trainer_ids = {load['trainer_id'] for load in teaching_loads}
+        
+        programs_map = {}
+        trainers_map = {}
+        
+        if program_ids:
+            programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type")
+            programs_map = {p['id']: p for p in programs}
+        
+        if trainer_ids:
+            trainers = select_rows("trainers", filters={"id": f"in.({','.join(map(str, trainer_ids))})"}, select="id,trainer_name,username")
+            trainers_map = {t['id']: t for t in trainers}
         
         # Enrich with program and trainer details
         enriched_loads = []
         for load in teaching_loads:
-            # Get program details
-            program = select_one("programs", filters={"id": f"eq.{load['program_id']}"})
-            # Get trainer details
-            trainer = select_one("trainers", filters={"id": f"eq.{load['trainer_id']}"})
+            program = programs_map.get(load['program_id'], {})
+            trainer = trainers_map.get(load['trainer_id'], {})
             
             enriched_load = {
                 **load,
-                "program_name": program.get("name", "Unknown Program") if program else "Unknown Program",
-                "program_type": program.get("type", "") if program else "",
-                "trainer_name": trainer.get("name", "Unknown Trainer") if trainer else "Unknown Trainer",
-                "trainer_email": trainer.get("email", "") if trainer else ""
+                "program_name": program.get("name", "Unknown Program"),
+                "program_type": program.get("type", ""),
+                "trainer_name": trainer.get("trainer_name", "Unknown Trainer"),
+                "trainer_username": trainer.get("username", "")
             }
             enriched_loads.append(enriched_load)
         
@@ -532,27 +547,39 @@ async def get_messages(
         offset = (page - 1) * limit
         total_pages = (total_count + limit - 1) // limit
         
-        # Get paginated messages with sender/recipient info
+        # Get paginated messages with minimal fields first
         messages = select_rows(
             "messages",
             filters=filters,
             order="created_at.desc",
             limit=limit,
-            offset=offset
+            offset=offset,
+            select="id,sender_id,recipient_id,subject,content,status,priority,created_at"
         )
+        
+        # Batch fetch users for all sender_id and recipient_id
+        user_ids = set()
+        for message in messages:
+            user_ids.add(message['sender_id'])
+            user_ids.add(message['recipient_id'])
+        
+        users_map = {}
+        if user_ids:
+            users = select_rows("users", filters={"id": f"in.({','.join(map(str, user_ids))})"}, select="id,username,full_name")
+            users_map = {u['id']: u for u in users}
         
         # Enrich with sender and recipient information
         enriched_messages = []
         for message in messages:
-            sender = select_one("users", filters={"id": f"eq.{message['sender_id']}"})
-            recipient = select_one("users", filters={"id": f"eq.{message['recipient_id']}"})
+            sender = users_map.get(message['sender_id'], {})
+            recipient = users_map.get(message['recipient_id'], {})
             
             enriched_message = {
                 **message,
-                "sender_name": sender.get("full_name", sender.get("username", "Unknown")) if sender else "Unknown",
-                "sender_username": sender.get("username", "") if sender else "",
-                "recipient_name": recipient.get("full_name", recipient.get("username", "Unknown")) if recipient else "Unknown",
-                "recipient_username": recipient.get("username", "") if recipient else ""
+                "sender_name": sender.get("full_name", sender.get("username", "Unknown")),
+                "sender_username": sender.get("username", ""),
+                "recipient_name": recipient.get("full_name", recipient.get("username", "Unknown")),
+                "recipient_username": recipient.get("username", "")
             }
             enriched_messages.append(enriched_message)
         

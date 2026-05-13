@@ -91,10 +91,19 @@ def load_trainer_qualifications(trainer_id: int) -> list[dict]:
         "trainer_qualifications",
         filters={"trainer_id": f"eq.{trainer_id}"},
         order="created_at.desc",
+        select="id,trainer_id,program_id,nttc_number,created_at,updated_at"
     )
+    
+    # Batch fetch all programs at once instead of N+1 queries
+    program_ids = {q['program_id'] for q in qualification_rows}
+    programs_map = {}
+    if program_ids:
+        programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type,hours,is_active")
+        programs_map = {p['id']: p for p in programs}
+    
     result = []
     for qualification in qualification_rows:
-        program = select_one("programs", filters={"id": f"eq.{qualification['program_id']}"})
+        program = programs_map.get(qualification['program_id'])
         result.append({
             **qualification,
             "program": program,
@@ -143,7 +152,8 @@ async def get_trainers(
 
     try:
         filters = {"is_active": "eq.true"}
-        all_trainers = select_rows("trainers", filters=filters, order="created_at.desc")
+        # Fetch only needed columns
+        all_trainers = select_rows("trainers", filters=filters, order="created_at.desc", select="id,user_id,username,trainer_name,first_name,last_name,tm_number,tm_expiration,nttc_number,nttc_expiration,is_active,created_at")
 
         if search:
             search_lower = search.lower()
@@ -157,10 +167,20 @@ async def get_trainers(
 
         total = len(all_trainers)
         trainers = all_trainers[skip:skip + limit]
+        
+        # Fetch user emails/names for this batch in one query instead of N queries
+        user_ids = [t['user_id'] for t in trainers]
+        users_map = {}
+        if user_ids:
+            # Use select with filter to get all users at once
+            users = select_rows("users", filters={"id": f"in.({','.join(map(str, user_ids))})"}, select="id,email,full_name")
+            users_map = {u['id']: u for u in users}
+        
         for trainer in trainers:
-            user = select_one("users", filters={"id": f"eq.{trainer['user_id']}"}, select="email,full_name")
-            trainer["email"] = (user or {}).get("email")
-            trainer["full_name"] = (user or {}).get("full_name")
+            user = users_map.get(trainer['user_id'], {})
+            trainer["email"] = user.get("email")
+            trainer["full_name"] = user.get("full_name")
+        
         response = {
             "data": trainers,
             "total": total,
@@ -168,7 +188,7 @@ async def get_trainers(
             "limit": limit,
             "has_more": (skip + limit) < total,
         }
-        cache_manager.set(cache_key, response)
+        cache_manager.set(cache_key, response, 300000)  # 5 min cache
         return response
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -500,11 +520,19 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
             "trainer_programs",
             filters={"trainer_id": f"eq.{trainer_id}"},
             order="created_at.desc",
+            select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,approved_by,approved_at,created_at"
         )
+
+        # Batch fetch all programs at once
+        program_ids = {a['program_id'] for a in assignments}
+        programs_map = {}
+        if program_ids:
+            programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"})
+            programs_map = {p['id']: p for p in programs}
 
         result = []
         for assignment in assignments:
-            program = select_one("programs", filters={"id": f"eq.{assignment['program_id']}"})
+            program = programs_map.get(assignment['program_id'])
             if not program:
                 continue
             result.append(

@@ -26,15 +26,6 @@ export default function Inbox() {
   // Load messages
   const loadMessages = useCallback(async (page = 1, status = 'all') => {
     try {
-      const cacheKey = cacheManager.generateKey('admin_messages', { page, status })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setMessages(cached.data)
-        setTotalPages(cached.totalPages)
-        setCurrentPage(cached.currentPage)
-        return
-      }
-
       const response = await fetch(`${API_BASE}/api/messages?page=${page}&limit=${PAGE_SIZE}&status=${status}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
@@ -42,7 +33,6 @@ export default function Inbox() {
       setMessages(data.data || [])
       setTotalPages(data.totalPages || 0)
       setCurrentPage(data.currentPage || 1)
-      cacheManager.set(cacheKey, { data: data.data || [], totalPages: data.totalPages || 0, currentPage: data.currentPage || 1 }, 300000)
     } catch (error) {
       console.error('Failed to load messages:', error)
       setMessages([])
@@ -295,9 +285,9 @@ export default function Inbox() {
               {messages
                 .filter(msg => 
                   !searchTerm || 
-                  msg.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  msg.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  msg.sender_name.toLowerCase().includes(searchTerm.toLowerCase())
+                  (msg.subject || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (msg.content || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (msg.sender_name || msg.sender?.full_name || msg.sender?.username || 'unknown').toLowerCase().includes(searchTerm.toLowerCase())
                 )
                 .map((message) => (
                   <div
@@ -314,7 +304,7 @@ export default function Inbox() {
                         <div className="flex items-center gap-2 mb-1">
                           {getStatusIcon(message.status)}
                           <span className="text-sm text-slate-900 truncate">
-                            {message.sender_name}
+                            {message.sender_name || message.sender?.full_name || message.sender?.username || 'Unknown'}
                           </span>
                           <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(message.priority)}`}>
                             {message.priority}
@@ -369,7 +359,10 @@ export default function Inbox() {
                     <div className="flex items-center gap-4 text-sm text-slate-600">
                       <div className="flex items-center gap-2">
                         <User className="h-4 w-4" />
-                        <span>From: {selectedMessage.sender_name} ({selectedMessage.sender_username})</span>
+                        <span>
+                          From: {selectedMessage.sender_name || selectedMessage.sender?.full_name || selectedMessage.sender?.username || 'Unknown'}
+                          {selectedMessage.sender_username ? ` (${selectedMessage.sender_username})` : ''}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4" />
@@ -606,7 +599,7 @@ function ReplyMessageModal({ onClose, onReply, originalMessage }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
           <div className="text-sm text-slate-600 mb-2">
-            <strong>From:</strong> {originalMessage.sender_name}
+            <strong>From:</strong> {originalMessage.sender_name || originalMessage.sender?.full_name || originalMessage.sender?.username || 'Unknown'}
           </div>
           <div className="text-sm text-slate-600">
             <strong>Original Message:</strong>
