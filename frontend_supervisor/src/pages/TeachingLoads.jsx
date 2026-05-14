@@ -24,6 +24,42 @@ export default function TeachingLoads() {
   const [programTotalPages, setProgramTotalPages] = useState(0)
   const [trainerTotalPages, setTrainerTotalPages] = useState(0)
   const [expandedItems, setExpandedItems] = useState(new Set())
+  const [teachingLoadsLoading, setTeachingLoadsLoading] = useState(false)
+  const [allTeachingLoads, setAllTeachingLoads] = useState([])
+
+  // Load all teaching loads for badge counts by fetching for each program
+  const loadAllTeachingLoads = useCallback(async (programsList) => {
+    try {
+      if (!programsList || programsList.length === 0) {
+        setAllTeachingLoads([])
+        return
+      }
+
+      const cacheKey = cacheManager.generateKey('all_teaching_loads_combined')
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setAllTeachingLoads(cached)
+        return
+      }
+
+      // Load teaching loads for all programs in parallel
+      const promises = programsList.map(program =>
+        fetch(`${API_BASE}/api/admin/programs/${program.id}/teaching-loads`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        })
+          .then(res => res.ok ? res.json() : [])
+          .catch(() => [])
+      )
+
+      const results = await Promise.all(promises)
+      const allLoads = results.flat().filter(Boolean)
+      setAllTeachingLoads(allLoads)
+      cacheManager.set(cacheKey, allLoads, 300000)
+    } catch (error) {
+      console.error('Failed to load all teaching loads:', error)
+      setAllTeachingLoads([])
+    }
+  }, [])
 
   // Load programs with pagination
   const loadPrograms = useCallback(async (page = 1, search = '') => {
@@ -83,12 +119,13 @@ export default function TeachingLoads() {
         return
       }
 
-      const response = await fetch(`${API_BASE}/api/programs/${programId}/teaching-loads`, {
+      const response = await fetch(`${API_BASE}/api/admin/programs/${programId}/teaching-loads`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      setTeachingLoads(Array.isArray(data) ? data : [])
-      cacheManager.set(cacheKey, Array.isArray(data) ? data : [], 300000)
+      const nextLoads = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []
+      setTeachingLoads(nextLoads)
+      cacheManager.set(cacheKey, nextLoads, 300000)
     } catch (error) {
       console.error('Failed to load program teaching loads:', error)
       setTeachingLoads([])
@@ -109,8 +146,9 @@ export default function TeachingLoads() {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      setTeachingLoads(Array.isArray(data) ? data : [])
-      cacheManager.set(cacheKey, Array.isArray(data) ? data : [], 300000)
+      const nextLoads = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []
+      setTeachingLoads(nextLoads)
+      cacheManager.set(cacheKey, nextLoads, 300000)
     } catch (error) {
       console.error('Failed to load trainer teaching loads:', error)
       setTeachingLoads([])
@@ -128,6 +166,13 @@ export default function TeachingLoads() {
     }
     loadData()
   }, [loadPrograms, loadTrainers])
+
+  // Load all teaching loads once programs are loaded
+  useEffect(() => {
+    if (programs.length > 0) {
+      loadAllTeachingLoads(programs)
+    }
+  }, [programs, loadAllTeachingLoads])
 
   // Search handlers
   useEffect(() => {
@@ -166,18 +211,28 @@ export default function TeachingLoads() {
   const handleProgramSelect = async (program) => {
     setSelectedProgram(program)
     setSelectedTrainer(null)
-    setTeachingLoads([])
+    setTeachingLoadsLoading(true)
+    setExpandedItems((prevExpanded) => {
+      const nextExpanded = new Set(prevExpanded)
+      nextExpanded.add(program.id)
+      return nextExpanded
+    })
     await loadProgramTeachingLoads(program.id)
-    toggleExpanded(program.id)
+    setTeachingLoadsLoading(false)
   }
 
   // Trainer selection handler
   const handleTrainerSelect = async (trainer) => {
     setSelectedTrainer(trainer)
     setSelectedProgram(null)
-    setTeachingLoads([])
+    setTeachingLoadsLoading(true)
+    setExpandedItems((prevExpanded) => {
+      const nextExpanded = new Set(prevExpanded)
+      nextExpanded.add(trainer.id)
+      return nextExpanded
+    })
     await loadTrainerTeachingLoads(trainer.id)
-    toggleExpanded(trainer.id)
+    setTeachingLoadsLoading(false)
   }
 
   // Filter data based on search term
@@ -262,6 +317,8 @@ export default function TeachingLoads() {
             programs={filteredPrograms}
             selectedProgram={selectedProgram}
             teachingLoads={teachingLoads}
+            allTeachingLoads={allTeachingLoads}
+            teachingLoadsLoading={teachingLoadsLoading}
             expandedItems={expandedItems}
             onProgramSelect={handleProgramSelect}
             onLoadSelect={setSelectedLoad}
@@ -275,6 +332,8 @@ export default function TeachingLoads() {
             trainers={filteredTrainers}
             selectedTrainer={selectedTrainer}
             teachingLoads={teachingLoads}
+            allTeachingLoads={allTeachingLoads}
+            teachingLoadsLoading={teachingLoadsLoading}
             expandedItems={expandedItems}
             onTrainerSelect={handleTrainerSelect}
             onLoadSelect={setSelectedLoad}
@@ -305,6 +364,8 @@ function ProgramsView({
   programs,
   selectedProgram,
   teachingLoads,
+  allTeachingLoads,
+  teachingLoadsLoading,
   expandedItems,
   onProgramSelect,
   onLoadSelect,
@@ -335,7 +396,7 @@ function ProgramsView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {teachingLoads.filter(load => load.program_id === program.id).length} trainers
+                    {(selectedProgram?.id === program.id ? teachingLoads : allTeachingLoads).filter(load => load.program_id === program.id).length} trainers
                   </span>
                   {expandedItems.has(program.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -349,7 +410,9 @@ function ProgramsView({
             {expandedItems.has(program.id) && selectedProgram?.id === program.id && (
               <div className="border-t border-slate-200 p-4">
                 <h4 className="text-sm font-bold text-slate-700 mb-3">Assigned Trainers</h4>
-                {teachingLoads.length === 0 ? (
+                {teachingLoadsLoading ? (
+                  <p className="text-sm text-slate-500">Loading assigned trainers...</p>
+                ) : teachingLoads.length === 0 ? (
                   <p className="text-sm text-slate-500">No teaching loads assigned to this program.</p>
                 ) : (
                   <div className="space-y-2">
@@ -409,6 +472,8 @@ function TrainersView({
   trainers,
   selectedTrainer,
   teachingLoads,
+  allTeachingLoads,
+  teachingLoadsLoading,
   expandedItems,
   onTrainerSelect,
   onLoadSelect,
@@ -439,7 +504,7 @@ function TrainersView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {teachingLoads.filter(load => load.trainer_id === trainer.id).length} programs
+                    {(selectedTrainer?.id === trainer.id ? teachingLoads : allTeachingLoads).filter(load => load.trainer_id === trainer.id).length} programs
                   </span>
                   {expandedItems.has(trainer.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -453,7 +518,9 @@ function TrainersView({
             {expandedItems.has(trainer.id) && selectedTrainer?.id === trainer.id && (
               <div className="border-t border-slate-200 p-4">
                 <h4 className="text-sm font-bold text-slate-700 mb-3">Assigned Programs</h4>
-                {teachingLoads.length === 0 ? (
+                {teachingLoadsLoading ? (
+                  <p className="text-sm text-slate-500">Loading assigned programs...</p>
+                ) : teachingLoads.length === 0 ? (
                   <p className="text-sm text-slate-500">No teaching loads assigned to this trainer.</p>
                 ) : (
                   <div className="space-y-2">

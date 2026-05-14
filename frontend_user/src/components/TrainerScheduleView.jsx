@@ -87,37 +87,56 @@ export default function TrainerScheduleView({ program, trainerId }) {
     }
   }
 
-  // Helper function to generate calendar weeks
-const generateCalendarWeeks = (totalDays) => {
+  // Helper function to generate calendar weeks based on actual start date
+const generateCalendarWeeks = (totalDays, startDate) => {
   const weeks = []
   let currentDay = 1
   
+  // Calculate the starting day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+  let startingDayOfWeek = 0 // Default to Sunday if no start date
+  if (startDate) {
+    const date = new Date(startDate)
+    startingDayOfWeek = date.getDay() // 0 = Sunday, 1 = Monday, etc.
+  }
+  
+  // Adjust to Monday-based week (0 = Monday, 1 = Tuesday, ..., 6 = Sunday)
+  const mondayBasedStart = startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1
+  
+  // Create first week with leading empty slots
+  let week = []
+  
+  // Add empty slots for days before the start date
+  for (let i = 0; i < mondayBasedStart; i++) {
+    week.push(null)
+  }
+  
+  // Add training days
   while (currentDay <= totalDays) {
-    const week = []
-    
-    // Add Monday to Friday (work days)
-    for (let i = 0; i < 5; i++) {
-      if (currentDay <= totalDays) {
-        week.push({
-          dayNumber: currentDay,
-          dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i],
-          isWeekend: false
-        })
-        currentDay++
-      } else {
-        week.push(null)
+    // If current day in week
+    if (week.length < 7) {
+      const dayOfWeekInWeek = week.length
+      const isWeekend = dayOfWeekInWeek === 5 || dayOfWeekInWeek === 6 // Saturday or Sunday
+      
+      week.push({
+        dayNumber: currentDay,
+        dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dayOfWeekInWeek],
+        isWeekend: false
+      })
+      currentDay++
+      
+      // If week is complete
+      if (week.length === 7) {
+        weeks.push(week)
+        week = []
       }
     }
-    
-    // Add Saturday and Sunday (weekend)
-    for (let i = 0; i < 2; i++) {
-      week.push({
-        dayNumber: null,
-        dayName: ['Sat', 'Sun'][i],
-        isWeekend: true
-      })
+  }
+  
+  // Add remaining empty slots to complete the last week
+  if (week.length > 0) {
+    while (week.length < 7) {
+      week.push(null)
     }
-    
     weeks.push(week)
   }
   
@@ -158,7 +177,7 @@ return (
               
               {/* Calendar Weeks */}
               <div className="space-y-1">
-                {generateCalendarWeeks(calendarDays).map((week, weekIndex) => (
+                {generateCalendarWeeks(calendarDays, program.schedule_date).map((week, weekIndex) => (
                   <div key={weekIndex} className="grid grid-cols-7 gap-1">
                     {week.map((day, dayIndex) => {
                       if (day === null) {

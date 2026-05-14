@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Mail, Send, Search, AlertCircle, User, Clock, Check } from 'lucide-react'
+import { Mail, Send, AlertCircle, User, Clock, Check } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = 'http://localhost:5000'
 const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
@@ -15,6 +16,7 @@ export default function Messages() {
   const [sentMessages, setSentMessages] = useState([])
   const [receivedMessages, setReceivedMessages] = useState([])
   const [error, setError] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Ensure adminUsers is always an array
   const safeAdminUsers = Array.isArray(adminUsers) ? adminUsers : []
@@ -66,12 +68,15 @@ export default function Messages() {
 
   // Load sent messages
   const loadSentMessages = useCallback(async () => {
-    if (!user?.id) {
+    const authUserId = String(user?.user_id || user?.id || '')
+    if (!authUserId) {
       console.log('User not available, skipping message load')
       return
     }
     
     try {
+      const cacheKey = cacheManager.generateKey('trainer_messages', { user_id: authUserId })
+      
       const response = await fetch(`${API_BASE}/api/messages`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
@@ -89,20 +94,29 @@ export default function Messages() {
       const data = await response.json()
       
       const allMessages = Array.isArray(data.data) ? data.data : []
-      const userId = String(user.id)
+      const userId = authUserId
 
       const trainerMessages = allMessages.filter((msg) => String(msg.sender_id) === userId)
       const inboxMessages = allMessages.filter((msg) => String(msg.recipient_id) === userId)
 
       setSentMessages(trainerMessages)
-      setReceivedMessages(inboxMessages)
+      setReceivedMessages(
+        inboxMessages.sort((a, b) => {
+          const aUnread = a.status === 'unread' ? 0 : 1
+          const bUnread = b.status === 'unread' ? 0 : 1
+          if (aUnread !== bUnread) return aUnread - bUnread
+          return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        })
+      )
+      // Cache the messages
+      cacheManager.set(cacheKey, { sent: trainerMessages, received: inboxMessages })
     } catch (error) {
       console.error('Failed to load sent messages:', error)
       setSentMessages([])
       setReceivedMessages([])
       // Don't set error for sent messages, just use empty state
     }
-  }, [user?.id])
+  }, [user?.id, user?.user_id])
 
   useEffect(() => {
     const loadData = async () => {
@@ -126,6 +140,46 @@ export default function Messages() {
       setLoading(false)
     }
   }, [user, loadAdminUsers, loadSentMessages])
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+
+    const interval = setInterval(() => {
+      loadSentMessages()
+    }, 15000)
+
+    return () => clearInterval(interval)
+  }, [isAuthenticated, user, loadSentMessages])
+
+  // Setup websocket for real-time messages
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+
+    try {
+      const socket = getSocket()
+      if (socket) {
+        registerUser(user.user_id || user.id)
+        
+        // Listen for new messages
+        socket.on('new_message', (messageData) => {
+          console.log('New message received via websocket:', messageData)
+          // Refresh messages immediately
+          const authUserId = String(user?.user_id || user?.id || '')
+          if (authUserId) {
+            const cacheKey = cacheManager.generateKey('trainer_messages', { user_id: authUserId })
+            cacheManager.delete(cacheKey)
+          }
+          loadSentMessages()
+        })
+
+        return () => {
+          socket.off('new_message')
+        }
+      }
+    } catch (error) {
+      console.error('Failed to setup websocket:', error)
+    }
+  }, [isAuthenticated, user, loadSentMessages])
 
   // Early return if not authenticated
   if (!isAuthenticated) {
@@ -153,6 +207,12 @@ export default function Messages() {
       })
       if (response.ok) {
         setShowComposeModal(false)
+        // Clear cache and reload messages
+        const authUserId = String(user?.user_id || user?.id || '')
+        if (authUserId) {
+          const cacheKey = cacheManager.generateKey('trainer_messages', { user_id: authUserId })
+          cacheManager.delete(cacheKey)
+        }
         await loadSentMessages()
       }
     } catch (error) {
@@ -438,12 +498,13 @@ function ComposeMessageModal({ onClose, onSend, adminUsers, currentTrainer }) {
           <select
             value={formData.recipient_id}
             onChange={(e) => setFormData({ ...formData, recipient_id: e.target.value })}
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+            style={{ color: '#000000' }}
             required
           >
-            <option value="">Select administrator...</option>
+            <option value="" className="text-black">Select administrator...</option>
             {adminUsers.map((admin) => (
-              <option key={admin.id} value={admin.id}>
+              <option key={admin.id} value={admin.id} className="text-black">
                 {admin.full_name} ({admin.user_type})
               </option>
             ))}
@@ -472,12 +533,13 @@ function ComposeMessageModal({ onClose, onSend, adminUsers, currentTrainer }) {
             <select
               value={formData.message_type}
               onChange={(e) => setFormData({ ...formData, message_type: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+              style={{ color: '#000000' }}
             >
-              <option value="issue">Issue</option>
-              <option value="inquiry">Inquiry</option>
-              <option value="report">Report</option>
-              <option value="other">Other</option>
+              <option value="issue" className="text-black">Issue</option>
+              <option value="inquiry" className="text-black">Inquiry</option>
+              <option value="report" className="text-black">Report</option>
+              <option value="other" className="text-black">Other</option>
             </select>
           </div>
 
@@ -488,12 +550,13 @@ function ComposeMessageModal({ onClose, onSend, adminUsers, currentTrainer }) {
             <select
               value={formData.priority}
               onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+              style={{ color: '#000000' }}
             >
-              <option value="low">Low - General inquiry</option>
-              <option value="normal">Normal - Standard issue</option>
-              <option value="high">High - Important issue</option>
-              <option value="urgent">Urgent - Emergency</option>
+              <option value="low" className="text-black">Low - General inquiry</option>
+              <option value="normal" className="text-black">Normal - Standard issue</option>
+              <option value="high" className="text-black">High - Important issue</option>
+              <option value="urgent" className="text-black">Urgent - Emergency</option>
             </select>
           </div>
         </div>

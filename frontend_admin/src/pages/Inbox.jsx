@@ -1,126 +1,183 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Mail, Send, Reply, Trash2, Search, Filter, Bell, User, Clock, AlertCircle } from 'lucide-react'
+import { Mail, Send, AlertCircle, User, Clock, Check } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
-const PAGE_SIZE = 20
 
 export default function Inbox() {
-  const { user } = useAuth()
-  const [messages, setMessages] = useState([])
-  const [selectedMessage, setSelectedMessage] = useState(null)
-  const [unreadCount, setUnreadCount] = useState(0)
+  const { user, isAuthenticated } = useAuth()
+  const [trainerUsers, setTrainerUsers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(0)
   const [showComposeModal, setShowComposeModal] = useState(false)
-  const [showReplyModal, setShowReplyModal] = useState(false)
-  const [replyToMessage, setReplyToMessage] = useState(null)
-  const [adminUsers, setAdminUsers] = useState([])
+  const [sentMessages, setSentMessages] = useState([])
+  const [receivedMessages, setReceivedMessages] = useState([])
+  const [error, setError] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  // Load messages
-  const loadMessages = useCallback(async (page = 1, status = 'all') => {
+  // Ensure trainerUsers is always an array
+  const safeTrainerUsers = Array.isArray(trainerUsers) ? trainerUsers : []
+
+  // Load trainer users
+  const loadTrainerUsers = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/messages?page=${page}&limit=${PAGE_SIZE}&status=${status}`, {
+      const cacheKey = cacheManager.generateKey('trainers_list', { search: null })
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setTrainerUsers(cached)
+        return
+      }
+
+      const response = await fetch(`${API_BASE}/api/trainers/?skip=0&limit=100`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      
+      if (response.status === 404) {
+        console.log('Trainers endpoint not available - using empty list')
+        setTrainerUsers([])
+        return
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       const data = await response.json()
-      setMessages(data.data || [])
-      setTotalPages(data.totalPages || 0)
-      setCurrentPage(data.currentPage || 1)
+      const trainerData = (data.data && Array.isArray(data.data)) ? data.data : []
+      setTrainerUsers(trainerData)
+      cacheManager.set(cacheKey, trainerData, 600000) // 10 minutes cache
+    } catch (error) {
+      console.error('Failed to load trainer users:', error)
+      setTrainerUsers([])
+    }
+  }, [])
+
+  // Load all messages
+  const loadMessages = useCallback(async () => {
+    const authUserId = String(user?.user_id || user?.id || '')
+    if (!authUserId) {
+      console.log('User not available, skipping message load')
+      return
+    }
+    
+    try {
+      const cacheKey = cacheManager.generateKey('admin_messages', { user_id: authUserId })
+      
+      const response = await fetch(`${API_BASE}/api/messages`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      
+      if (response.status === 404) {
+        console.log('Messaging system not yet set up - no messages')
+        setSentMessages([])
+        setReceivedMessages([])
+        return
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      
+      const allMessages = Array.isArray(data.data) ? data.data : []
+      const userId = authUserId
+
+      const adminMessages = allMessages.filter((msg) => String(msg.sender_id) === userId)
+      const inboxMessages = allMessages.filter((msg) => String(msg.recipient_id) === userId)
+
+      setSentMessages(adminMessages)
+      setReceivedMessages(
+        inboxMessages.sort((a, b) => {
+          const aUnread = a.status === 'unread' ? 0 : 1
+          const bUnread = b.status === 'unread' ? 0 : 1
+          if (aUnread !== bUnread) return aUnread - bUnread
+          return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        })
+      )
+      // Cache the messages
+      cacheManager.set(cacheKey, { sent: adminMessages, received: inboxMessages })
     } catch (error) {
       console.error('Failed to load messages:', error)
-      setMessages([])
+      setSentMessages([])
+      setReceivedMessages([])
     }
-  }, [])
-
-  // Load unread count
-  const loadUnreadCount = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/messages/unread-count`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-      const data = await response.json()
-      setUnreadCount(data.count || 0)
-    } catch (error) {
-      console.error('Failed to load unread count:', error)
-      setUnreadCount(0)
-    }
-  }, [])
-
-  // Load admin users
-  const loadAdminUsers = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/admin-users`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-      const data = await response.json()
-      setAdminUsers(data || [])
-    } catch (error) {
-      console.error('Failed to load admin users:', error)
-      setAdminUsers([])
-    }
-  }, [])
+  }, [user?.id, user?.user_id])
 
   useEffect(() => {
     const loadData = async () => {
+      if (!user) {
+        console.log('User not loaded yet, waiting...')
+        return
+      }
+      
       setLoading(true)
+      setError(null)
       await Promise.all([
-        loadMessages(1, statusFilter),
-        loadUnreadCount(),
-        loadAdminUsers()
+        loadTrainerUsers(),
+        loadMessages()
       ])
       setLoading(false)
     }
-    loadData()
-  }, [loadMessages, loadUnreadCount, loadAdminUsers, statusFilter])
-
-  // Handle message selection
-  const handleMessageSelect = async (message) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/messages/${message.id}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-      const data = await response.json()
-      setSelectedMessage(data)
-      
-      // Update unread count
-      if (message.status === 'unread') {
-        setUnreadCount(prev => Math.max(0, prev - 1))
-      }
-    } catch (error) {
-      console.error('Failed to load message:', error)
+    
+    if (user) {
+      loadData()
+    } else {
+      setLoading(false)
     }
-  }
+  }, [user, loadTrainerUsers, loadMessages, refreshKey])
 
-  // Handle reply
-  const handleReply = (message) => {
-    setReplyToMessage(message)
-    setShowReplyModal(true)
-  }
+  // Setup websocket for real-time messages
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
 
-  // Handle delete
-  const handleDelete = async (messageId) => {
     try {
-      const response = await fetch(`${API_BASE}/api/messages/${messageId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-      if (response.ok) {
-        await loadMessages(currentPage, statusFilter)
-        await loadUnreadCount()
-        if (selectedMessage?.id === messageId) {
-          setSelectedMessage(null)
+      const socket = getSocket()
+      if (socket) {
+        registerUser(user.user_id || user.id)
+        
+        // Listen for new messages
+        socket.on('new_message', (messageData) => {
+          console.log('New message received via websocket:', messageData)
+          // Refresh messages
+          loadMessages()
+          // Clear cache
+          const cacheKey = cacheManager.generateKey('admin_messages', { user_id: user.user_id || user.id })
+          cacheManager.delete(cacheKey)
+        })
+
+        return () => {
+          socket.off('new_message')
         }
       }
     } catch (error) {
-      console.error('Failed to delete message:', error)
+      console.error('Failed to setup websocket:', error)
     }
+  }, [isAuthenticated, user, loadMessages])
+
+  // Polling as fallback
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+
+    const interval = setInterval(() => {
+      loadMessages()
+    }, 15000)
+
+    return () => clearInterval(interval)
+  }, [isAuthenticated, user, loadMessages])
+
+  // Early return if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">Authentication Required</h2>
+          <p className="text-slate-600">Please log in to access inbox.</p>
+        </div>
+      </div>
+    )
   }
 
   // Handle send message
@@ -136,35 +193,13 @@ export default function Inbox() {
       })
       if (response.ok) {
         setShowComposeModal(false)
-        await loadMessages(currentPage, statusFilter)
-        await loadUnreadCount()
+        // Refresh messages and clear cache
+        const cacheKey = cacheManager.generateKey('admin_messages', { user_id: user.user_id || user.id })
+        cacheManager.delete(cacheKey)
+        await loadMessages()
       }
     } catch (error) {
       console.error('Failed to send message:', error)
-    }
-  }
-
-  // Handle reply
-  const handleSendReply = async (replyData) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/messages/${replyToMessage.id}/reply`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify(replyData),
-      })
-      if (response.ok) {
-        setShowReplyModal(false)
-        setReplyToMessage(null)
-        await loadMessages(currentPage, statusFilter)
-        if (selectedMessage?.id === replyToMessage.id) {
-          setSelectedMessage(null)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to send reply:', error)
     }
   }
 
@@ -197,262 +232,191 @@ export default function Inbox() {
     switch (status) {
       case 'unread': return <Mail className="h-4 w-4" />
       case 'read': return <Mail className="h-4 w-4 text-gray-400" />
-      case 'replied': return <Reply className="h-4 w-4 text-green-600" />
+      case 'replied': return <Check className="h-4 w-4 text-green-600" />
       default: return <Mail className="h-4 w-4" />
     }
   }
 
+  if (loading && !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-cyan-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading inbox...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="text-center max-w-md">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">Error Loading Inbox</h2>
+          <p className="text-slate-600 mb-4">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm font-semibold hover:bg-cyan-700"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-6">
       {/* Header */}
-      <section className="rounded-[1.5rem] sm:rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-4 sm:p-6 lg:p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex-1">
-            <p className="text-xs sm:text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
-            <h1 className="mt-2 sm:mt-4 text-2xl sm:text-3xl lg:text-4xl font-black flex items-center gap-2 sm:gap-3 flex-wrap">
-              <Mail className="h-6 w-6 sm:h-8 sm:w-8" />
+      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
+            <h1 className="mt-4 text-4xl font-black flex items-center gap-3">
+              <Mail className="h-8 w-8" />
               Inbox
-              {unreadCount > 0 && (
-                <span className="bg-red-500 text-white text-xs sm:text-sm px-2 py-1 rounded-full">
-                  {unreadCount}
-                </span>
-              )}
             </h1>
-            <p className="mt-2 sm:mt-3 text-sm sm:text-base text-cyan-50/90 max-w-2xl">
-              Manage messages from trainers regarding issues and inquiries.
+            <p className="mt-3 max-w-2xl text-cyan-50/90">
+              Manage messages from trainers and staff.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setShowComposeModal(true)}
-            className="rounded-xl bg-white text-cyan-600 px-3 py-2 sm:px-4 sm:py-2 text-sm font-semibold hover:bg-cyan-50 transition flex items-center gap-2 w-full sm:w-auto justify-center"
+            className="rounded-xl bg-white text-cyan-600 px-4 py-2 text-sm font-semibold hover:bg-cyan-50 transition flex items-center gap-2"
           >
             <Send className="h-4 w-4" />
-            Compose
+            New Message
           </button>
         </div>
       </section>
 
-      {/* Controls */}
-      <section className="rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value)
-                setCurrentPage(1)
-                loadMessages(1, e.target.value)
-              }}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-            >
-              <option value="all">All Messages</option>
-              <option value="unread">Unread</option>
-              <option value="read">Read</option>
-              <option value="replied">Replied</option>
-            </select>
-          </div>
-          
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search messages..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none lg:w-80"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Messages List */}
-      <section className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+      {/* Received Messages */}
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900 mb-4">Messages from Trainers</h2>
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">
+          <div className="text-center text-slate-500 py-4">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-cyan-600 mx-auto mb-2"></div>
             Loading messages...
           </div>
-        ) : messages.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+        ) : receivedMessages.length === 0 ? (
+          <div className="text-center text-slate-500 py-8">
             <Mail className="mx-auto h-12 w-12 text-slate-400 mb-4" />
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">No messages</h3>
-            <p>Your inbox is empty.</p>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No messages received</h3>
+            <p>Messages from trainers will appear here.</p>
           </div>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[1fr_2fr]">
-            {/* Message List */}
-            <div className="border-r border-slate-200 p-4 space-y-2 max-h-[600px] overflow-y-auto">
-              {messages
-                .filter(msg => 
-                  !searchTerm || 
-                  (msg.subject || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (msg.content || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (msg.sender_name || msg.sender?.full_name || msg.sender?.username || 'unknown').toLowerCase().includes(searchTerm.toLowerCase())
-                )
-                .map((message) => (
-                  <div
-                    key={message.id}
-                    onClick={() => handleMessageSelect(message)}
-                    className={`p-4 rounded-xl border cursor-pointer transition ${
-                      selectedMessage?.id === message.id
-                        ? 'border-cyan-400 bg-cyan-50'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    } ${message.status === 'unread' ? 'font-semibold' : ''}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          {getStatusIcon(message.status)}
-                          <span className="text-sm text-slate-900 truncate">
-                            {message.sender_name || message.sender?.full_name || message.sender?.username || 'Unknown'}
-                          </span>
-                          <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(message.priority)}`}>
-                            {message.priority}
-                          </span>
-                        </div>
-                        <h4 className="text-sm text-slate-900 truncate mb-1">
-                          {message.subject}
-                        </h4>
-                        <p className="text-xs text-slate-600 line-clamp-2">
-                          {message.content}
-                        </p>
-                      </div>
-                      <div className="text-xs text-slate-500 whitespace-nowrap">
-                        {formatDate(message.created_at)}
+          <div className="space-y-3">
+            {receivedMessages.map((message) => (
+              <div key={message.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-semibold text-slate-900">{message.subject}</h3>
+                      <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(message.priority)}`}>
+                        {message.priority}
+                      </span>
+                      <div className="flex items-center gap-1 text-xs text-slate-500">
+                        {getStatusIcon(message.status)}
+                        <span className="capitalize">{message.status}</span>
                       </div>
                     </div>
-                  </div>
-                ))}
-            </div>
-
-            {/* Message Detail */}
-            <div className="p-6">
-              {selectedMessage ? (
-                <div className="space-y-6">
-                  <div className="border-b border-slate-200 pb-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-xl font-bold text-slate-900">
-                        {selectedMessage.subject}
-                      </h2>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(selectedMessage.priority)}`}>
-                          {selectedMessage.priority}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleReply(selectedMessage)}
-                          className="rounded-xl bg-cyan-600 text-white px-3 py-1 text-sm font-semibold hover:bg-cyan-700 transition flex items-center gap-1"
-                        >
-                          <Reply className="h-3 w-3" />
-                          Reply
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(selectedMessage.id)}
-                          className="rounded-xl bg-red-600 text-white px-3 py-1 text-sm font-semibold hover:bg-red-700 transition flex items-center gap-1"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-slate-600">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        <span>
-                          From: {selectedMessage.sender_name || selectedMessage.sender?.full_name || selectedMessage.sender?.username || 'Unknown'}
-                          {selectedMessage.sender_username ? ` (${selectedMessage.sender_username})` : ''}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        <span>{formatDate(selectedMessage.created_at)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="prose prose-slate max-w-none">
-                    <p className="whitespace-pre-wrap text-slate-700">
-                      {selectedMessage.content}
+                    <p className="text-sm text-slate-600 mb-2 whitespace-pre-wrap">
+                      {message.content}
                     </p>
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <div className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        <span>From: {message.sender_name || message.sender_username || 'Trainer'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>Received: {formatDate(message.created_at)}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <div className="text-center text-slate-500 py-12">
-                  <Mail className="mx-auto h-12 w-12 text-slate-400 mb-4" />
-                  <h3 className="text-lg font-semibold text-slate-900 mb-2">Select a message</h3>
-                  <p>Choose a message from the list to view its contents.</p>
-                </div>
-              )}
-            </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              const newPage = currentPage - 1
-              setCurrentPage(newPage)
-              loadMessages(newPage, statusFilter)
-            }}
-            disabled={currentPage === 1}
-            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Previous
-          </button>
-          <span className="flex items-center px-3 py-2 text-sm text-slate-600">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              const newPage = currentPage + 1
-              setCurrentPage(newPage)
-              loadMessages(newPage, statusFilter)
-            }}
-            disabled={currentPage === totalPages}
-            className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      {/* Sent Messages */}
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900 mb-4">Your Sent Messages</h2>
+        {loading ? (
+          <div className="text-center text-slate-500 py-4">Loading messages...</div>
+        ) : sentMessages.length === 0 ? (
+          <div className="text-center text-slate-500 py-8">
+            <Mail className="mx-auto h-12 w-12 text-slate-400 mb-4" />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No messages sent yet</h3>
+            <p>Click "New Message" to send your first message to a trainer.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {sentMessages.map((message) => (
+              <div key={message.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-semibold text-slate-900">{message.subject}</h3>
+                      <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(message.priority)}`}>
+                        {message.priority}
+                      </span>
+                      <div className="flex items-center gap-1 text-xs text-slate-500">
+                        {getStatusIcon(message.status)}
+                        <span className="capitalize">{message.status}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-2 whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <div className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        <span>To: {message.recipient_name || message.recipient_username || 'Trainer'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>Sent: {formatDate(message.created_at)}</span>
+                      </div>
+                      {message.read_at && (
+                        <div className="flex items-center gap-1">
+                          <Check className="h-3 w-3" />
+                          <span>Read: {formatDate(message.read_at)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Compose Modal */}
       {showComposeModal && (
         <ComposeMessageModal
           onClose={() => setShowComposeModal(false)}
           onSend={handleSendMessage}
-          adminUsers={adminUsers}
-        />
-      )}
-
-      {/* Reply Modal */}
-      {showReplyModal && replyToMessage && (
-        <ReplyMessageModal
-          onClose={() => {
-            setShowReplyModal(false)
-            setReplyToMessage(null)
-          }}
-          onReply={handleSendReply}
-          originalMessage={replyToMessage}
+          trainerUsers={safeTrainerUsers}
+          currentAdmin={user}
         />
       )}
     </div>
   )
 }
 
-// Compose Message Modal
-function ComposeMessageModal({ onClose, onSend, adminUsers }) {
+// Compose Message Modal for Admin
+function ComposeMessageModal({ onClose, onSend, trainerUsers, currentAdmin }) {
   const [formData, setFormData] = useState({
     recipient_id: '',
     subject: '',
     content: '',
-    message_type: 'issue',
+    message_type: 'response',
     priority: 'normal'
   })
   const [loading, setLoading] = useState(false)
@@ -469,22 +433,23 @@ function ComposeMessageModal({ onClose, onSend, adminUsers }) {
   }
 
   return (
-    <ModalShell title="Compose Message" onClose={onClose}>
+    <ModalShell title="Send Message to Trainer" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">
-            Recipient
+            To Trainer
           </label>
           <select
             value={formData.recipient_id}
             onChange={(e) => setFormData({ ...formData, recipient_id: e.target.value })}
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+            style={{ color: '#000000' }}
             required
           >
-            <option value="">Select recipient...</option>
-            {adminUsers.map((admin) => (
-              <option key={admin.id} value={admin.id}>
-                {admin.full_name} ({admin.user_type})
+            <option value="" className="text-black">Select trainer...</option>
+            {trainerUsers.map((trainer) => (
+              <option key={trainer.id} value={trainer.id} className="text-black">
+                {trainer.first_name} {trainer.last_name}
               </option>
             ))}
           </select>
@@ -500,23 +465,25 @@ function ComposeMessageModal({ onClose, onSend, adminUsers }) {
             onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             required
+            placeholder="Brief subject of your message"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Type
+              Message Type
             </label>
             <select
               value={formData.message_type}
               onChange={(e) => setFormData({ ...formData, message_type: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+              style={{ color: '#000000' }}
             >
-              <option value="issue">Issue</option>
-              <option value="inquiry">Inquiry</option>
-              <option value="report">Report</option>
-              <option value="other">Other</option>
+              <option value="response" className="text-black">Response</option>
+              <option value="notification" className="text-black">Notification</option>
+              <option value="update" className="text-black">Update</option>
+              <option value="other" className="text-black">Other</option>
             </select>
           </div>
 
@@ -527,12 +494,13 @@ function ComposeMessageModal({ onClose, onSend, adminUsers }) {
             <select
               value={formData.priority}
               onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none"
+              style={{ color: '#000000' }}
             >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
+              <option value="low" className="text-black">Low</option>
+              <option value="normal" className="text-black">Normal</option>
+              <option value="high" className="text-black">High</option>
+              <option value="urgent" className="text-black">Urgent</option>
             </select>
           </div>
         </div>
@@ -544,9 +512,10 @@ function ComposeMessageModal({ onClose, onSend, adminUsers }) {
           <textarea
             value={formData.content}
             onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-            rows={6}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none resize-none"
+            rows={6}
             required
+            placeholder="Type your message here..."
           />
         </div>
 
@@ -554,94 +523,16 @@ function ComposeMessageModal({ onClose, onSend, adminUsers }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={loading}
-            className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-50 flex items-center gap-2"
+            className="rounded-xl bg-cyan-600 text-white px-4 py-2 text-sm font-semibold hover:bg-cyan-700 disabled:opacity-50"
           >
-            {loading ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Send
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  )
-}
-
-// Reply Message Modal
-function ReplyMessageModal({ onClose, onReply, originalMessage }) {
-  const [replyData, setReplyData] = useState({
-    content: ''
-  })
-  const [loading, setLoading] = useState(false)
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      await onReply(replyData)
-      onClose()
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <ModalShell title={`Reply to: ${originalMessage.subject}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-          <div className="text-sm text-slate-600 mb-2">
-            <strong>From:</strong> {originalMessage.sender_name || originalMessage.sender?.full_name || originalMessage.sender?.username || 'Unknown'}
-          </div>
-          <div className="text-sm text-slate-600">
-            <strong>Original Message:</strong>
-          </div>
-          <div className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">
-            {originalMessage.content}
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Your Reply
-          </label>
-          <textarea
-            value={replyData.content}
-            onChange={(e) => setReplyData({ ...replyData, content: e.target.value })}
-            rows={6}
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-cyan-400 focus:outline-none resize-none"
-            required
-            placeholder="Type your reply here..."
-          />
-        </div>
-
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            {loading ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Send Reply
+            {loading ? 'Sending...' : 'Send Message'}
           </button>
         </div>
       </form>

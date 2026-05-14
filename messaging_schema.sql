@@ -96,6 +96,20 @@ CREATE TRIGGER trigger_create_message_notification
     FOR EACH ROW
     EXECUTE FUNCTION trigger_message_notification();
 
+-- Normalize deletion flags for existing rows so inbox filters don't hide valid replies.
+ALTER TABLE IF EXISTS messages
+    ALTER COLUMN is_deleted_by_sender SET DEFAULT FALSE,
+    ALTER COLUMN is_deleted_by_recipient SET DEFAULT FALSE;
+
+UPDATE messages
+SET is_deleted_by_sender = COALESCE(is_deleted_by_sender, FALSE),
+    is_deleted_by_recipient = COALESCE(is_deleted_by_recipient, FALSE)
+WHERE is_deleted_by_sender IS NULL OR is_deleted_by_recipient IS NULL;
+
+ALTER TABLE IF EXISTS messages
+    ALTER COLUMN is_deleted_by_sender SET NOT NULL,
+    ALTER COLUMN is_deleted_by_recipient SET NOT NULL;
+
 -- Note: RLS (Row Level Security) is NOT enabled here
 -- Authorization is enforced by the FastAPI backend using get_current_user dependency
 -- This allows the schema to work with both local PostgreSQL and Supabase

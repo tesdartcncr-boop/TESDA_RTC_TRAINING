@@ -127,8 +127,7 @@ async def get_trainer_programs_schedules(
             if not program:
                 continue
             ensure_assignment_view_access(current_user, trainer, assignment)
-            synced_rows = sync_assignment_schedule(assignment, program)
-            result.append(build_assignment_summary(trainer, assignment, program, synced_rows))
+            result.append(build_assignment_summary(trainer, assignment, program, []))
 
         if approval_status is None:
             cache_manager.set(cache_key, result)
