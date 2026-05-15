@@ -44,3 +44,8 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend production envs
+frontend_admin/.env.production
+frontend_supervisor/.env.production
+frontend_user/.env.production
