@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import PropTypes from 'prop-types'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import jwtDecode from 'jwt-decode'
+import { jwtDecode } from 'jwt-decode'
 import { normalizeApiError } from '../utils/apiErrors'
 
 const AuthContext = createContext()
