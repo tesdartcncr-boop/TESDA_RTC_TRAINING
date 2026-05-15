@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router-dom'
-import { KeyRound, Mail, Pencil, Plus, ShieldCheck, User } from 'lucide-react'
+import { KeyRound, Mail, Pencil, Plus, ShieldCheck, Trash2, User } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
@@ -15,8 +15,10 @@ export default function AdminAccounts() {
   const [searchParams] = useSearchParams()
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState(null)
+  const [accountToDelete, setAccountToDelete] = useState(null)
   const roleFilter = searchParams.get('role') || (user?.user_type === 'supervisor' ? 'supervisor' : '')
 
   const createForm = useForm({
@@ -70,6 +72,7 @@ export default function AdminAccounts() {
   }, [roleFilter])
 
   const handleCreate = async (values) => {
+    setIsProcessing(true)
     try {
       const response = await fetch(`${API_BASE}/api/admin/accounts`, {
         method: 'POST',
@@ -89,6 +92,8 @@ export default function AdminAccounts() {
       loadAccounts()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -103,6 +108,7 @@ export default function AdminAccounts() {
   }
 
   const handleUpdate = async (values) => {
+    setIsProcessing(true)
     try {
       const payload = {
         email: values.email,
@@ -128,6 +134,30 @@ export default function AdminAccounts() {
       loadAccounts()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handleDelete = async (account) => {
+    setAccountToDelete(null)
+    setIsProcessing(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/accounts/${account.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to delete account')
+
+      toast.success('Account deleted successfully')
+      cacheManager.clearPattern('accounts_list:')
+      cacheManager.clearPattern('stats_')
+      await loadAccounts()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -138,6 +168,11 @@ export default function AdminAccounts() {
 
   return (
     <div className="space-y-6">
+      {isProcessing && (
+        <div className="sticky top-0 z-20 overflow-hidden rounded-full bg-slate-200/70">
+          <div className="h-1.5 w-full animate-pulse bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-500" />
+        </div>
+      )}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900">{pageTitle}</h1>
@@ -147,7 +182,8 @@ export default function AdminAccounts() {
           <button
             type="button"
             onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20"
+            disabled={isProcessing}
+            className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Plus className="mr-2 h-4 w-4" />
             Create Account
@@ -182,6 +218,14 @@ export default function AdminAccounts() {
                 <button type="button" onClick={() => handleOpenEdit(account)} className="inline-flex items-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccountToDelete(account)}
+                  className="inline-flex items-center rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
                 </button>
               </div>
             </div>
@@ -223,7 +267,7 @@ export default function AdminAccounts() {
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
-              <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Create Account</button>
+              <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isProcessing ? 'Creating...' : 'Create Account'}</button>
             </div>
           </form>
         </ModalShell>
@@ -255,9 +299,27 @@ export default function AdminAccounts() {
             )}
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setEditingAccount(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
-              <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Update Account</button>
+              <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {isProcessing ? 'Updating...' : 'Update Account'}
+              </button>
             </div>
           </form>
+        </ModalShell>
+      )}
+
+      {accountToDelete && (
+        <ModalShell title="Confirm Delete" onClose={() => setAccountToDelete(null)} maxWidth="max-w-lg">
+          <div className="space-y-5">
+            <p className="text-sm text-slate-600">
+              Delete {accountToDelete.full_name || accountToDelete.username}? This will permanently remove the account.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setAccountToDelete(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="button" onClick={() => handleDelete(accountToDelete)} className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700">
+                Delete
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>

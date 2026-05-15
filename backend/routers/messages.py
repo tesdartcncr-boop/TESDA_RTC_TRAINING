@@ -24,6 +24,8 @@ FILTER_TRUE = "eq.true"
 USER_TYPE_ADMIN = "eq.admin"
 USER_TYPE_SUPERVISOR = "eq.supervisor"
 USER_SELECT_FIELDS = "id,username,full_name,email,user_type"
+MANAGEMENT_USER_TYPES = {"admin", "supervisor"}
+ALLOWED_MESSAGE_TYPES = {"issue", "inquiry", "report", "other"}
 
 
 def _unknown_user() -> dict:
@@ -34,6 +36,17 @@ def _unknown_user() -> dict:
         "email": UNKNOWN_EMAIL,
         "user_type": None,
     }
+
+
+def _normalize_user_type(user_type: str | None) -> str | None:
+    if not isinstance(user_type, str):
+        return None
+    return user_type.strip().lower()
+
+
+def _normalize_message_type(message_type: str | None) -> str:
+    normalized = (message_type or "").strip().lower()
+    return normalized if normalized in ALLOWED_MESSAGE_TYPES else "other"
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -61,7 +74,7 @@ def _load_users_map(user_ids: set[int]) -> dict[int, dict]:
 
 
 def _load_visible_user_ids(current_user: dict) -> set[int]:
-    if current_user.get("user_type") in {"admin", "supervisor"}:
+    if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
         admin_users = select_rows(
             "users",
             filters={"user_type": USER_TYPE_ADMIN, "is_active": FILTER_TRUE},
@@ -83,10 +96,19 @@ def _enrich_message(message: dict, users_map: dict[int, dict]) -> dict:
     message["sender_name"] = sender.get("full_name") or sender.get("username") or "Unknown"
     message["sender_username"] = sender.get("username") or "unknown"
     message["sender_email"] = sender.get("email") or UNKNOWN_EMAIL
+    message["sender_user_type"] = _normalize_user_type(sender.get("user_type"))
     message["recipient_name"] = recipient.get("full_name") or recipient.get("username") or "Unknown"
     message["recipient_username"] = recipient.get("username") or "unknown"
     message["recipient_email"] = recipient.get("email") or UNKNOWN_EMAIL
+    message["recipient_user_type"] = _normalize_user_type(recipient.get("user_type"))
     return message
+
+
+def _dedupe_messages(messages: list[dict]) -> list[dict]:
+    unique_messages: dict[int, dict] = {}
+    for message in messages:
+        unique_messages[message["id"]] = message
+    return list(unique_messages.values())
 
 
 @router.get("")
@@ -99,11 +121,18 @@ async def get_messages(
 ):
     """Get all messages sent by or to the current user."""
     try:
-        user_type = current_user.get("user_type")
+        user_type = _normalize_user_type(current_user.get("user_type"))
 
-        if user_type in {"admin", "supervisor"}:
-            visible_user_ids = _load_visible_user_ids(current_user)
-            sender_messages = []
+        if user_type in MANAGEMENT_USER_TYPES:
+            visible_user_ids = _load_visible_user_ids({**current_user, "user_type": user_type})
+            sender_messages = select_rows(
+                "messages",
+                filters={
+                    "sender_id": f"in.({','.join(map(str, sorted(visible_user_ids)))})",
+                    "or": "(is_deleted_by_sender.eq.false,is_deleted_by_sender.is.null)",
+                },
+                order="created_at.desc",
+            )
             recipient_messages = select_rows(
                 "messages",
                 filters={
@@ -112,7 +141,7 @@ async def get_messages(
                 },
                 order="created_at.desc",
             )
-            all_messages = recipient_messages
+            all_messages = _dedupe_messages(sender_messages + recipient_messages)
         else:
             sender_messages = select_rows(
                 "messages",
@@ -122,6 +151,7 @@ async def get_messages(
                 },
                 order="created_at.desc",
             )
+
 
             recipient_messages = select_rows(
                 "messages",
@@ -190,7 +220,7 @@ async def create_message(
             "recipient_id": message_data.recipient_id,
             "subject": message_data.subject,
             "content": message_data.content,
-            "message_type": message_data.message_type,
+            "message_type": _normalize_message_type(message_data.message_type),
             "priority": message_data.priority,
             "status": "unread",
             "reply_to_id": message_data.reply_to_id,
@@ -200,6 +230,8 @@ async def create_message(
         result = insert_row("messages", message)
         
         return result
+    except HTTPException:
+        raise
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
     except Exception as exc:
@@ -212,7 +244,7 @@ async def create_message(
 @router.get("/unread-count")
 async def get_unread_count(current_user: CurrentUser):
     try:
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             unread_messages = select_rows(
                 "messages",
@@ -254,7 +286,7 @@ async def get_message(
             )
         
         # Check if user has access to this message
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             has_access = message["recipient_id"] in visible_user_ids or message["sender_id"] in visible_user_ids
         else:
@@ -301,7 +333,7 @@ async def update_message(
             )
         
         # Check if user has access
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             has_access = message["sender_id"] in visible_user_ids or message["recipient_id"] in visible_user_ids
         else:
@@ -341,7 +373,7 @@ async def reply_to_message(
         if not original_message:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_FOUND_MESSAGE)
 
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             has_access = (
                 original_message["sender_id"] in visible_user_ids
@@ -353,7 +385,7 @@ async def reply_to_message(
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE)
 
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             # In shared management inbox, always route the reply to the non-management participant.
             visible_user_ids = _load_visible_user_ids(current_user)
             sender_is_management = original_message["sender_id"] in visible_user_ids
@@ -379,7 +411,7 @@ async def reply_to_message(
             "recipient_id": recipient_id,
             "subject": f"Re: {original_message.get('subject') or ''}".strip(),
             "content": reply_data.get("content", ""),
-            "message_type": original_message.get("message_type") or "issue",
+            "message_type": _normalize_message_type(original_message.get("message_type")),
             "priority": reply_data.get("priority") or "normal",
             "status": "unread",
             "reply_to_id": message_id,
@@ -420,7 +452,7 @@ async def delete_message(
             )
         
         # Check if user has access
-        if current_user.get("user_type") in {"admin", "supervisor"}:
+        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             if message["sender_id"] not in visible_user_ids and message["recipient_id"] not in visible_user_ids:
                 raise HTTPException(

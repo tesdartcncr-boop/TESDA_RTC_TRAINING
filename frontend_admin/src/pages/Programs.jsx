@@ -258,11 +258,11 @@ export default function Programs() {
       )}
 
       {showCreateModal && (
-        <ModalShell title="Create Program" onClose={() => setShowCreateModal(false)} maxWidth="max-w-2xl">
+        <ModalShell title="Create Program" onClose={() => setShowCreateModal(false)} maxWidth="max-w-5xl">
           <form className="grid gap-4 md:grid-cols-2" onSubmit={createForm.handleSubmit(handleCreate)}>
             <div className="md:col-span-2">
               <label htmlFor="program_name" className="block text-sm font-semibold text-slate-700">Program Name</label>
-              <input id="program_name" {...createForm.register('name', { required: 'Program name is required' })} className={`${fieldClassName} mt-2`} />
+              <input id="program_name" {...createForm.register('name', { required: 'Program name is required' })} placeholder="e.g. Welding Basics" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
               <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
@@ -280,11 +280,11 @@ export default function Programs() {
             </div>
             <div className="md:col-span-2">
               <label htmlFor="program_hours" className="block text-sm font-semibold text-slate-700">Number of Hours</label>
-              <input id="program_hours" type="number" {...createForm.register('hours')} className={`${fieldClassName} mt-2`} />
+              <input id="program_hours" type="number" {...createForm.register('hours')} placeholder="e.g. 120" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
               <label htmlFor="program_description" className="block text-sm font-semibold text-slate-700">Description</label>
-              <textarea id="program_description" rows={4} {...createForm.register('description')} className={`${fieldClassName} mt-2`} />
+              <textarea id="program_description" rows={4} {...createForm.register('description')} placeholder="Describe the program objectives and curriculum..." className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2 flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>

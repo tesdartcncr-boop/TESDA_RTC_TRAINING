@@ -28,6 +28,7 @@ export default function Schedules() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const createForm = useForm({
     defaultValues: {
@@ -176,6 +177,7 @@ export default function Schedules() {
   }, [assignments, statusFilter])
 
   const handleCreate = async (values) => {
+    setIsProcessing(true)
     try {
       const response = await fetch(`${API_BASE}/api/trainers/${values.trainer_id}/programs`, {
         method: 'POST',
@@ -210,11 +212,14 @@ export default function Schedules() {
       loadAssignments()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
   const handleApproval = async (nextStatus) => {
     if (!selectedAssignment) return
+    setIsProcessing(true)
     try {
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${selectedAssignment.trainer_id}/program/${selectedAssignment.program_id}/approval`, {
         method: 'PUT',
@@ -237,6 +242,8 @@ export default function Schedules() {
       loadAssignments()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -294,11 +301,11 @@ export default function Schedules() {
 
       {(user?.user_type === 'admin' || user?.user_type === 'supervisor') && selectedAssignment.approval_status !== 'approved' && (
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={() => handleApproval('approved')} className="inline-flex items-center rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white">
+          <button type="button" onClick={() => handleApproval('approved')} disabled={isProcessing} className="inline-flex items-center rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
             <CheckCircle2 className="mr-2 h-4 w-4" />
             Approve
           </button>
-          <button type="button" onClick={() => handleApproval('rejected')} className="inline-flex items-center rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white">
+          <button type="button" onClick={() => handleApproval('rejected')} disabled={isProcessing} className="inline-flex items-center rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
             <XCircle className="mr-2 h-4 w-4" />
             Reject
           </button>
@@ -356,6 +363,11 @@ export default function Schedules() {
 
   return (
     <div className="space-y-6">
+      {isProcessing && (
+        <div className="sticky top-0 z-20 overflow-hidden rounded-full bg-slate-200/70">
+          <div className="h-1.5 w-full animate-pulse bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-500" />
+        </div>
+      )}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900">Teaching Loads</h1>
@@ -365,7 +377,8 @@ export default function Schedules() {
           <button
             type="button"
             onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20"
+            disabled={isProcessing}
+            className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Plus className="mr-2 h-4 w-4" />
             Create Teaching Load
@@ -401,7 +414,7 @@ export default function Schedules() {
       </div>
 
       {showCreateModal && (
-        <ModalShell title="Create Teaching Load" onClose={() => setShowCreateModal(false)} maxWidth="max-w-2xl">
+        <ModalShell title="Create Teaching Load" onClose={() => setShowCreateModal(false)} maxWidth="max-w-5xl">
           <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
             <div>
               <label htmlFor="teaching_load_trainer" className="block text-sm font-semibold text-slate-700">Trainer</label>
@@ -450,7 +463,7 @@ export default function Schedules() {
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
-              <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Assign Load</button>
+              <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isProcessing ? 'Processing...' : 'Assign Load'}</button>
             </div>
           </form>
         </ModalShell>

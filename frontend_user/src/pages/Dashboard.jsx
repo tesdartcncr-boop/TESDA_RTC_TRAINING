@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { BookOpen, Briefcase, CalendarDays } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import TrainerScheduleView from '../components/TrainerScheduleView'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = 'http://localhost:5000'
 const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
@@ -13,42 +14,70 @@ export default function Dashboard() {
   const [selectedLoad, setSelectedLoad] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const loadTeachingLoads = async () => {
-      if (!user?.id) {
+  const loadTeachingLoads = useCallback(async (forceRefresh = false) => {
+    if (!user?.id) {
+      setLoading(false)
+      return
+    }
+
+    try {
+      const trainerId = user.trainer_id || user.id
+      const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
+      const cached = forceRefresh ? null : cacheManager.get(cacheKey)
+      if (Array.isArray(cached) && cached.length > 0) {
+        setTeachingLoads(cached)
+        setSelectedLoad(cached[0] || null)
         setLoading(false)
         return
       }
 
-      try {
-        const trainerId = user.trainer_id || user.id
-        const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
-        const cached = cacheManager.get(cacheKey)
-        if (cached !== null) {
-          const cachedLoads = Array.isArray(cached) ? cached : []
-          setTeachingLoads(cachedLoads)
-          setSelectedLoad(cachedLoads[0] || null)
-          setLoading(false)
-          return
-        }
-
-        const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        })
-        const data = await response.json()
-        const loads = Array.isArray(data) ? data : []
-        setTeachingLoads(loads)
-        setSelectedLoad(loads[0] || null)
-        cacheManager.set(cacheKey, loads)
-      } catch (error) {
-        console.error(error)
-        setTeachingLoads([])
-      } finally {
-        setLoading(false)
-      }
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      const loads = Array.isArray(data) ? data : []
+      setTeachingLoads(loads)
+      setSelectedLoad(loads[0] || null)
+      cacheManager.set(cacheKey, loads)
+    } catch (error) {
+      console.error(error)
+      setTeachingLoads([])
+      setSelectedLoad(null)
+    } finally {
+      setLoading(false)
     }
-    loadTeachingLoads()
   }, [user?.id, user?.trainer_id])
+
+  useEffect(() => {
+    loadTeachingLoads()
+  }, [loadTeachingLoads])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    registerUser(user.user_id || user.id)
+
+    const handleScheduleUpdate = (payload) => {
+      if (!payload) return
+
+      const trainerId = user.trainer_id || user.id
+      const isRelevant = payload.trainer_id && String(payload.trainer_id) === String(trainerId)
+      if (!isRelevant) return
+
+      const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
+      cacheManager.delete(cacheKey)
+      loadTeachingLoads(true)
+    }
+
+    socket.on('schedule_update', handleScheduleUpdate)
+
+    return () => {
+      socket.off('schedule_update', handleScheduleUpdate)
+    }
+  }, [loadTeachingLoads, user?.id, user?.trainer_id, user?.user_id])
 
   const totalHours = teachingLoads.reduce((sum, load) => sum + (load.program_total_hours || 0), 0)
   const totalDays = teachingLoads.reduce((sum, load) => sum + (load.program_days || 0), 0)

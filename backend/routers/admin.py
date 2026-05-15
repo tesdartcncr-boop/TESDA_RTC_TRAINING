@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user, get_password_hash
 from ..schemas import AccountCreate, AccountUpdate, NotificationCreate, NotificationResponse
-from ..supabase_rest import SupabaseAPIError, count_rows, insert_row, select_one, select_rows, update_row
+from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, insert_row, select_one, select_rows, update_row
 
 router = APIRouter()
 
@@ -216,6 +216,33 @@ async def create_notification(notification_data: NotificationCreate, current_use
                 "is_read": False,
             },
         )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(account_id: int, current_user: CurrentUser):
+    ensure_management_role(current_user)
+
+    try:
+        account = select_one(
+            "users",
+            filters={"id": f"eq.{account_id}"},
+            select="id,username,user_type",
+        )
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+        if account.get("user_type") not in {"admin", "supervisor"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admin and supervisor accounts can be deleted here")
+
+        if int(account_id) == int(current_user["id"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+
+        delete_rows("notifications", filters={"user_id": f"eq.{account_id}"}, returning="minimal")
+        delete_rows("users", filters={"id": f"eq.{account_id}"}, returning="minimal")
+
+        return {"message": "Account deleted successfully"}
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 

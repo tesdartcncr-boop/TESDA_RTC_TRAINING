@@ -107,34 +107,34 @@ function TrainerFormFields({ form, isEdit }) {
     <div className="grid gap-4 md:grid-cols-2">
       <div>
         <label htmlFor={`${mode}_first_name`} className="block text-sm font-semibold text-slate-700">First Name</label>
-        <input id={`${mode}_first_name`} {...form.register('first_name', requiredIfCreate('First name is required'))} className={fieldClass} />
+        <input id={`${mode}_first_name`} {...form.register('first_name', requiredIfCreate('First name is required'))} placeholder="e.g. Juan" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_middle_name`} className="block text-sm font-semibold text-slate-700">Middle Name</label>
-        <input id={`${mode}_middle_name`} {...form.register('middle_name')} className={fieldClass} />
+        <input id={`${mode}_middle_name`} {...form.register('middle_name')} placeholder="e.g. Carlos" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_last_name`} className="block text-sm font-semibold text-slate-700">Surname</label>
-        <input id={`${mode}_last_name`} {...form.register('last_name', requiredIfCreate('Surname is required'))} className={fieldClass} />
+        <input id={`${mode}_last_name`} {...form.register('last_name', requiredIfCreate('Surname is required'))} placeholder="e.g. Dela Cruz" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_extension`} className="block text-sm font-semibold text-slate-700">Extension</label>
-        <input id={`${mode}_extension`} {...form.register('extension')} className={fieldClass} />
+        <input id={`${mode}_extension`} {...form.register('extension')} placeholder="e.g. Jr." className={fieldClass} />
       </div>
       {!isEdit && (
         <div>
           <label htmlFor="create_username" className="block text-sm font-semibold text-slate-700">Username</label>
-          <input id="create_username" {...form.register('username', requiredIfCreate('Username is required'))} className={fieldClass} />
+          <input id="create_username" {...form.register('username', requiredIfCreate('Username is required'))} placeholder="e.g. juan_dela_cruz" className={fieldClass} />
         </div>
       )}
       <div>
         <label htmlFor={`${mode}_email`} className="block text-sm font-semibold text-slate-700">Email</label>
-        <input id={`${mode}_email`} type="email" {...form.register('email', requiredIfCreate('Email is required'))} className={fieldClass} />
+        <input id={`${mode}_email`} type="email" {...form.register('email', requiredIfCreate('Email is required'))} placeholder="e.g. juan@rtc.local" className={fieldClass} />
       </div>
       {!isEdit && (
         <div>
           <label htmlFor="create_password" className="block text-sm font-semibold text-slate-700">Password</label>
-          <input id="create_password" type="password" {...form.register('password', requiredIfCreate('Password is required'))} className={fieldClass} />
+          <input id="create_password" type="password" {...form.register('password', requiredIfCreate('Password is required'))} placeholder="Min 8 characters" className={fieldClass} />
         </div>
       )}
       <div>
@@ -151,7 +151,7 @@ function TrainerFormFields({ form, isEdit }) {
       </div>
       <div>
         <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TM Number</label>
-        <input id={`${mode}_tm_number`} {...form.register('tm_number')} className={fieldClass} />
+        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TM123456" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TM Expiration</label>

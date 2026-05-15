@@ -107,34 +107,34 @@ function TrainerFormFields({ form, isEdit }) {
     <div className="grid gap-4 md:grid-cols-2">
       <div>
         <label htmlFor={`${mode}_first_name`} className="block text-sm font-semibold text-slate-700">First Name</label>
-        <input id={`${mode}_first_name`} {...form.register('first_name', requiredIfCreate('First name is required'))} className={fieldClass} />
+        <input id={`${mode}_first_name`} {...form.register('first_name', requiredIfCreate('First name is required'))} placeholder="e.g. Juan" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_middle_name`} className="block text-sm font-semibold text-slate-700">Middle Name</label>
-        <input id={`${mode}_middle_name`} {...form.register('middle_name')} className={fieldClass} />
+        <input id={`${mode}_middle_name`} {...form.register('middle_name')} placeholder="e.g. Carlos" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_last_name`} className="block text-sm font-semibold text-slate-700">Surname</label>
-        <input id={`${mode}_last_name`} {...form.register('last_name', requiredIfCreate('Surname is required'))} className={fieldClass} />
+        <input id={`${mode}_last_name`} {...form.register('last_name', requiredIfCreate('Surname is required'))} placeholder="e.g. Dela Cruz" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_extension`} className="block text-sm font-semibold text-slate-700">Extension</label>
-        <input id={`${mode}_extension`} {...form.register('extension')} className={fieldClass} />
+        <input id={`${mode}_extension`} {...form.register('extension')} placeholder="e.g. Jr." className={fieldClass} />
       </div>
       {!isEdit && (
         <div>
           <label htmlFor="create_username" className="block text-sm font-semibold text-slate-700">Username</label>
-          <input id="create_username" {...form.register('username', requiredIfCreate('Username is required'))} className={fieldClass} />
+          <input id="create_username" {...form.register('username', requiredIfCreate('Username is required'))} placeholder="e.g. juan_dela_cruz" className={fieldClass} />
         </div>
       )}
       <div>
         <label htmlFor={`${mode}_email`} className="block text-sm font-semibold text-slate-700">Email</label>
-        <input id={`${mode}_email`} type="email" {...form.register('email', requiredIfCreate('Email is required'))} className={fieldClass} />
+        <input id={`${mode}_email`} type="email" {...form.register('email', requiredIfCreate('Email is required'))} placeholder="e.g. juan@rtc.local" className={fieldClass} />
       </div>
       {!isEdit && (
         <div>
           <label htmlFor="create_password" className="block text-sm font-semibold text-slate-700">Password</label>
-          <input id="create_password" type="password" {...form.register('password', requiredIfCreate('Password is required'))} className={fieldClass} />
+          <input id="create_password" type="password" {...form.register('password', requiredIfCreate('Password is required'))} placeholder="Min 8 characters" className={fieldClass} />
         </div>
       )}
       <div>
@@ -151,7 +151,7 @@ function TrainerFormFields({ form, isEdit }) {
       </div>
       <div>
         <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TM Number</label>
-        <input id={`${mode}_tm_number`} {...form.register('tm_number')} className={fieldClass} />
+        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TM123456" className={fieldClass} />
       </div>
       <div>
         <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TM Expiration</label>
@@ -181,8 +181,10 @@ export default function Trainers() {
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingTrainer, setEditingTrainer] = useState(null)
+  const [trainerToDelete, setTrainerToDelete] = useState(null)
   const [createQualifications, setCreateQualifications] = useState([])
   const [editQualifications, setEditQualifications] = useState([])
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const createForm = useForm({ defaultValues: emptyTrainerValues })
   const editForm = useForm({ defaultValues: emptyTrainerValues })
@@ -297,6 +299,7 @@ export default function Trainers() {
   }, [trainers, searchTerm])
 
   const handleCreate = async (values) => {
+    setIsProcessing(true)
     try {
       const payload = {
         ...values,
@@ -322,9 +325,10 @@ export default function Trainers() {
       setCreateQualifications([])
       setShowCreateModal(false)
       loadTrainers()
-      loadTrainers()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -378,6 +382,7 @@ export default function Trainers() {
   }
 
   const handleUpdate = async (values) => {
+    setIsProcessing(true)
     try {
       const payload = Object.entries({
         email: values.email,
@@ -428,13 +433,17 @@ export default function Trainers() {
       toast.success('Trainer updated successfully')
       invalidateTrainerCaches()
       setEditingTrainer(null)
+      loadTrainers()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
   const handleDelete = async (trainerId) => {
-    if (!globalThis.confirm('Delete this trainer account?')) return
+    setTrainerToDelete(null)
+    setIsProcessing(true)
     try {
       const response = await fetch(`${API_BASE}/api/trainers/${trainerId}`, {
         method: 'DELETE',
@@ -446,8 +455,11 @@ export default function Trainers() {
       }
       toast.success('Trainer deleted successfully')
       invalidateTrainerCaches()
+      loadTrainers()
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -462,8 +474,8 @@ export default function Trainers() {
       />
 
       <div className="flex justify-end gap-3">
-        <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">
-          {isEdit ? 'Update Trainer' : 'Create Trainer'}
+        <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
+          {isProcessing ? 'Processing...' : (isEdit ? 'Update Trainer' : 'Create Trainer')}
         </button>
       </div>
     </form>
@@ -471,6 +483,11 @@ export default function Trainers() {
 
   return (
     <div className="space-y-6">
+      {isProcessing && (
+        <div className="sticky top-0 z-20 overflow-hidden rounded-full bg-slate-200/70">
+          <div className="h-1.5 w-full animate-pulse bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-500" />
+        </div>
+      )}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900">Trainer</h1>
@@ -531,7 +548,7 @@ export default function Trainers() {
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
                 </button>
-                <button type="button" onClick={() => handleDelete(trainer.id)} className="inline-flex flex-1 items-center justify-center rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50">
+                <button type="button" onClick={() => setTrainerToDelete(trainer)} className="inline-flex flex-1 items-center justify-center rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50">
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
                 </button>
@@ -564,6 +581,22 @@ export default function Trainers() {
       {editingTrainer && (
         <ModalShell title="Edit Trainer" onClose={() => setEditingTrainer(null)} maxWidth="max-w-5xl">
           {renderTrainerForm(editForm, editQualifications, setEditQualifications, true)}
+        </ModalShell>
+      )}
+
+      {trainerToDelete && (
+        <ModalShell title="Confirm Delete" onClose={() => setTrainerToDelete(null)} maxWidth="max-w-lg">
+          <div className="space-y-5">
+            <p className="text-sm text-slate-600">
+              Delete {trainerToDelete.trainer_name || trainerToDelete.username}? This will permanently remove the trainer account.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setTrainerToDelete(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="button" onClick={() => handleDelete(trainerToDelete.id)} className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700">
+                Delete
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>

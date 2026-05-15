@@ -34,7 +34,11 @@ export default function MessageNotifications() {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      setRecentMessages(data.data || [])
+      const inboxMessages = (data.data || []).filter((message) => {
+        const senderType = String(message.sender_user_type || '').toLowerCase()
+        return senderType !== 'admin' && senderType !== 'supervisor'
+      })
+      setRecentMessages(inboxMessages)
     } catch (error) {
       console.error('Failed to load recent messages:', error)
       setRecentMessages([])
@@ -47,7 +51,7 @@ export default function MessageNotifications() {
   const handleMessageClick = async (messageId) => {
     try {
       // Mark as read
-      await fetch(`${API_BASE}/api/messages/${messageId}/status`, {
+      await fetch(`${API_BASE}/api/messages/${messageId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

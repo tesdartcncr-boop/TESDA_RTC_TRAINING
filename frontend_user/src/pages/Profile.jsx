@@ -61,6 +61,11 @@ export default function Profile() {
 
   return (
     <div className="space-y-6">
+      {isLoading && (
+        <div className="sticky top-0 z-20 overflow-hidden rounded-full bg-slate-200/70">
+          <div className="h-1.5 w-full animate-pulse bg-gradient-to-r from-cyan-500 via-blue-500 to-sky-500" />
+        </div>
+      )}
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-start gap-4">
@@ -83,7 +88,7 @@ export default function Profile() {
                 <X className="mr-2 h-4 w-4" />
                 Cancel
               </button>
-              <button type="button" onClick={form.handleSubmit(handleSave)} className="inline-flex items-center rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-semibold text-white">
+              <button type="button" onClick={form.handleSubmit(handleSave)} disabled={isLoading} className="inline-flex items-center rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
                 <Save className="mr-2 h-4 w-4" />
                 {isLoading ? 'Saving...' : 'Save'}
               </button>
