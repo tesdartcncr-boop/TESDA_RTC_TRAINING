@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import os
 import sys
 
 from fastapi import FastAPI
@@ -27,17 +28,26 @@ fastapi_app = FastAPI(
     lifespan=lifespan
 )
 
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+]
+
+
+def get_cors_origins():
+    raw_origins = os.getenv("CORS_ORIGINS", "")
+    configured = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return configured or DEFAULT_CORS_ORIGINS
+
+
 # CORS configuration
 fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-    ],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
