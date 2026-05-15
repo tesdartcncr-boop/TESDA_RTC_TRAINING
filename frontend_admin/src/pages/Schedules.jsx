@@ -14,6 +14,13 @@ const STATUS_COLORS = {
   suspended: 'bg-amber-500',
   incomplete: 'bg-orange-500',
 }
+const STATUS_OPTIONS = [
+  { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
+  { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
+  { key: 'leave', label: 'Leave', color: 'bg-sky-500' },
+  { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
+  { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
+]
 
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'

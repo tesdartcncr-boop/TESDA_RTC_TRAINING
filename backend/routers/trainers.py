@@ -141,9 +141,13 @@ async def get_trainers(
     current_user: CurrentUser,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    page: Annotated[int | None, Query(ge=1)] = None,
     search: Annotated[str | None, Query()] = None,
 ):
     ensure_management_user(current_user)
+
+    if page is not None:
+        skip = (page - 1) * limit
 
     cache_key = cache_manager.get_cache_key("trainers", skip=skip, limit=limit, search=search)
     cached = cache_manager.get(cache_key)
@@ -167,6 +171,7 @@ async def get_trainers(
 
         total = len(all_trainers)
         trainers = all_trainers[skip:skip + limit]
+        total_pages = max(1, -(-total // limit))
         
         # Fetch user emails/names for this batch in one query instead of N queries
         user_ids = [t['user_id'] for t in trainers]
@@ -186,6 +191,8 @@ async def get_trainers(
             "total": total,
             "skip": skip,
             "limit": limit,
+            "currentPage": (skip // limit) + 1,
+            "totalPages": total_pages,
             "has_more": (skip + limit) < total,
         }
         cache_manager.set(cache_key, response, 300000)  # 5 min cache

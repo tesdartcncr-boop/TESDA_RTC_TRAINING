@@ -62,7 +62,9 @@ async def get_programs(
         
         # Apply search filter at database level
         if search:
-            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity.ilike.%{search}%)"
+            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity.ilike.%{search}%,type.ilike.%{search}%,recognition_number.ilike.%{search}%)"
+
+        total = count_rows("programs", filters=filters)
         
         # Fetch paginated results directly from database
         programs = select_rows(
@@ -71,16 +73,20 @@ async def get_programs(
             order=ORDER_DESC,
             limit=limit,
             offset=skip,
-            select="id,name,description,type,validity,hours,schedule,days,is_active,created_at"
+            select="id,name,description,type,validity,hours,schedule,days,is_active,recognition_number,created_at"
         )
         
         # Check if there are more results
-        has_more = len(programs) == limit
+        has_more = (skip + len(programs)) < total
+        total_pages = max(1, -(-total // limit))
         
         response = {
             "data": programs,
+            "total": total,
             "skip": skip,
             "limit": limit,
+            "currentPage": (skip // limit) + 1,
+            "totalPages": total_pages,
             "has_more": has_more,
         }
         cache_manager.set(cache_key, response, 300000)  # 5 min cache
@@ -103,6 +109,7 @@ async def create_program(program_data: ProgramCreate, current_user: CurrentUser)
             "hours": program_data.hours,
             "schedule": program_data.schedule,
             "days": program_data.days,
+            "recognition_number": program_data.recognition_number,
             "created_by": current_user["id"],
             "is_active": True,
         }

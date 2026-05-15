@@ -7,6 +7,29 @@ import { cacheManager } from '../utils/cacheManager'
 const API_BASE = 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 const PAGE_SIZE = 15
+const TEACHING_LOADS_CACHE_VERSION = 'v2'
+
+const getTrainerDisplayName = (trainer) => (
+  trainer?.trainer_name || trainer?.full_name || trainer?.username || trainer?.email || 'Unnamed trainer'
+)
+
+const getTotalPages = (payload, page) => {
+  if (Number.isFinite(payload?.totalPages) && payload.totalPages > 0) {
+    return payload.totalPages
+  }
+
+  const totalCount = Number(payload?.total ?? payload?.totalCount)
+  if (Number.isFinite(totalCount) && totalCount >= 0) {
+    return Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  }
+
+  if (typeof payload?.has_more === 'boolean') {
+    return payload.has_more ? page + 1 : Math.max(page, 1)
+  }
+
+  const rowCount = Array.isArray(payload?.data) ? payload.data.length : 0
+  return rowCount >= PAGE_SIZE ? page + 1 : Math.max(page, 1)
+}
 
 export default function TeachingLoads() {
   const { user } = useAuth()
@@ -64,7 +87,7 @@ export default function TeachingLoads() {
   // Load programs with pagination
   const loadPrograms = useCallback(async (page = 1, search = '') => {
     try {
-      const cacheKey = cacheManager.generateKey('teaching_loads_programs', { page, search })
+      const cacheKey = cacheManager.generateKey('teaching_loads_programs', { page, search, version: TEACHING_LOADS_CACHE_VERSION })
       const cached = cacheManager.get(cacheKey)
       if (cached !== null) {
         setPrograms(cached.data)
@@ -72,13 +95,16 @@ export default function TeachingLoads() {
         return
       }
 
-      const response = await fetch(`${API_BASE}/api/programs/?page=${page}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
+      const skip = (page - 1) * PAGE_SIZE
+      const response = await fetch(`${API_BASE}/api/programs/?skip=${skip}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      setPrograms(data.data || [])
-      setProgramTotalPages(data.totalPages || 0)
-      cacheManager.set(cacheKey, { data: data.data || [], totalPages: data.totalPages || 0 }, 300000) // 5 minutes
+      const nextPrograms = data.data || []
+      const totalPages = getTotalPages(data, page)
+      setPrograms(nextPrograms)
+      setProgramTotalPages(totalPages)
+      cacheManager.set(cacheKey, { data: nextPrograms, totalPages }, 300000)
     } catch (error) {
       console.error('Failed to load programs:', error)
       setPrograms([])
@@ -88,7 +114,7 @@ export default function TeachingLoads() {
   // Load trainers with pagination
   const loadTrainers = useCallback(async (page = 1, search = '') => {
     try {
-      const cacheKey = cacheManager.generateKey('teaching_loads_trainers', { page, search })
+      const cacheKey = cacheManager.generateKey('teaching_loads_trainers', { page, search, version: TEACHING_LOADS_CACHE_VERSION })
       const cached = cacheManager.get(cacheKey)
       if (cached !== null) {
         setTrainers(cached.data)
@@ -96,13 +122,16 @@ export default function TeachingLoads() {
         return
       }
 
-      const response = await fetch(`${API_BASE}/api/trainers?page=${page}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
+      const skip = (page - 1) * PAGE_SIZE
+      const response = await fetch(`${API_BASE}/api/trainers/?skip=${skip}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      setTrainers(data.data || [])
-      setTrainerTotalPages(data.totalPages || 0)
-      cacheManager.set(cacheKey, { data: data.data || [], totalPages: data.totalPages || 0 }, 300000)
+      const nextTrainers = data.data || []
+      const totalPages = getTotalPages(data, page)
+      setTrainers(nextTrainers)
+      setTrainerTotalPages(totalPages)
+      cacheManager.set(cacheKey, { data: nextTrainers, totalPages }, 300000)
     } catch (error) {
       console.error('Failed to load trainers:', error)
       setTrainers([])
@@ -246,10 +275,11 @@ export default function TeachingLoads() {
 
   const filteredTrainers = useMemo(() => {
     if (!searchTerm) return trainers
-    return trainers.filter(trainer => 
-      (trainer.name && trainer.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (trainer.email && trainer.email.toLowerCase().includes(searchTerm.toLowerCase()))
-    )
+    const query = searchTerm.toLowerCase()
+    return trainers.filter((trainer) => {
+      const displayName = getTrainerDisplayName(trainer).toLowerCase()
+      return displayName.includes(query) || (trainer.email && trainer.email.toLowerCase().includes(query))
+    })
   }, [trainers, searchTerm])
 
   return (
@@ -498,7 +528,7 @@ function TrainersView({
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">{trainer.name}</h3>
+                  <h3 className="text-lg font-bold text-slate-900">{getTrainerDisplayName(trainer)}</h3>
                   <p className="text-sm text-slate-600">{trainer.email}</p>
                   <p className="text-xs text-slate-500 mt-1">TM Number: {trainer.tm_number || 'Not set'}</p>
                 </div>
