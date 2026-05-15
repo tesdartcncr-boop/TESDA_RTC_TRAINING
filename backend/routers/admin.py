@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .auth import get_current_user, get_password_hash
 from ..schemas import AccountCreate, AccountUpdate, NotificationCreate, NotificationResponse
 from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..user_cleanup import delete_user_auth_artifacts, delete_user_messages, reassign_management_history
 
 router = APIRouter()
 
@@ -228,7 +229,7 @@ async def delete_account(account_id: int, current_user: CurrentUser):
         account = select_one(
             "users",
             filters={"id": f"eq.{account_id}"},
-            select="id,username,user_type",
+            select="id,username,user_type,email",
         )
         if not account:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -239,6 +240,9 @@ async def delete_account(account_id: int, current_user: CurrentUser):
         if int(account_id) == int(current_user["id"]):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
 
+        reassign_management_history(account_id, int(current_user["id"]))
+        delete_user_messages(account_id)
+        delete_user_auth_artifacts(account.get("email"))
         delete_rows("notifications", filters={"user_id": f"eq.{account_id}"}, returning="minimal")
         delete_rows("users", filters={"id": f"eq.{account_id}"}, returning="minimal")
 

@@ -19,7 +19,7 @@ export default function Dashboard() {
         })
         const data = await response.json()
         setStats(data)
-      } catch (error) {
+      } catch {
         setStats(null)
       } finally {
         setLoading(false)
@@ -46,7 +46,7 @@ export default function Dashboard() {
           title: 'Create Teaching Load',
           description: 'Assign a qualified trainer and generate the weekday calendar.',
           icon: Briefcase,
-          action: () => navigate('/teaching-loads'),
+          action: () => navigate('/teaching-loads', { state: { openCreateModal: true } }),
         },
       ]
     : [

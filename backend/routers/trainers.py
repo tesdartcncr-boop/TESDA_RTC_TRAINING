@@ -16,6 +16,7 @@ from ..schemas import (
 )
 from ..socket_manager import broadcast_schedule_update, broadcast_trainer_update, send_notification_to_user
 from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..user_cleanup import delete_user_auth_artifacts, delete_user_messages
 
 router = APIRouter()
 
@@ -371,9 +372,12 @@ async def delete_trainer(trainer_id: int, current_user: CurrentUser):
     try:
         trainer = get_trainer_or_404(trainer_id)
         trainer_user_id = trainer["user_id"]
+        trainer_user = select_one("users", filters={"id": f"eq.{trainer_user_id}"}, select="id,email")
         delete_rows("schedules", filters={"trainer_id": f"eq.{trainer_id}"}, returning="minimal")
         delete_rows("trainer_programs", filters={"trainer_id": f"eq.{trainer_id}"}, returning="minimal")
         delete_rows("trainer_qualifications", filters={"trainer_id": f"eq.{trainer_id}"}, returning="minimal")
+        delete_user_messages(trainer_user_id)
+        delete_user_auth_artifacts((trainer_user or {}).get("email"))
         delete_rows("notifications", filters={"user_id": f"eq.{trainer_user_id}"}, returning="minimal")
         delete_rows("trainers", filters={"id": f"eq.{trainer_id}"}, returning="minimal")
         delete_rows("users", filters={"id": f"eq.{trainer_user_id}"}, returning="minimal")

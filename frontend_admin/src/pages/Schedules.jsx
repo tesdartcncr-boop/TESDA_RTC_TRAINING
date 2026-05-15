@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { CalendarDays, CheckCircle2, Clock3, Plus, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
@@ -26,6 +27,8 @@ const getToken = () => localStorage.getItem('management_token') || sessionStorag
 const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
 
 export default function Schedules() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [assignments, setAssignments] = useState([])
   const [selectedAssignment, setSelectedAssignment] = useState(null)
@@ -177,6 +180,13 @@ export default function Schedules() {
       loadTrainers()
     }
   }, [user?.user_type])
+
+  useEffect(() => {
+    if (location.state?.openCreateModal) {
+      setShowCreateModal(true)
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location, navigate])
 
   const filteredAssignments = useMemo(() => {
     if (statusFilter === 'all') return assignments

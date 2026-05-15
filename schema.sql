@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS programs (
     schedule VARCHAR(20) DEFAULT '8 Hours/Day' CHECK (schedule IN ('8 Hours/Day', '4 Hours/Day')),
     days INTEGER,
     is_active BOOLEAN DEFAULT true,
-    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     id SERIAL PRIMARY KEY,
     trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
-    assigned_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     hours_per_day INTEGER NOT NULL DEFAULT 8 CHECK (hours_per_day IN (4, 8)),
     approval_status VARCHAR(20) NOT NULL DEFAULT 'for approval' CHECK (approval_status IN ('for approval', 'approved', 'rejected')),
     approval_notes TEXT,
@@ -190,6 +190,9 @@ ALTER TABLE IF EXISTS trainer_programs
 ADD COLUMN IF NOT EXISTS batch VARCHAR(50);
 
 ALTER TABLE IF EXISTS trainer_programs
+ALTER COLUMN assigned_by DROP NOT NULL;
+
+ALTER TABLE IF EXISTS trainer_programs
 DROP CONSTRAINT IF EXISTS trainer_programs_hours_per_day_check;
 
 ALTER TABLE IF EXISTS trainer_programs
@@ -227,6 +230,9 @@ ADD COLUMN IF NOT EXISTS validity VARCHAR(100);
 
 ALTER TABLE IF EXISTS programs
 ADD COLUMN IF NOT EXISTS recognition_number VARCHAR(100);
+
+ALTER TABLE IF EXISTS programs
+ALTER COLUMN created_by DROP NOT NULL;
 
 ALTER TABLE IF EXISTS programs
 DROP CONSTRAINT IF EXISTS programs_type_check;
@@ -413,3 +419,61 @@ WHERE is_deleted_by_sender IS NULL OR is_deleted_by_recipient IS NULL;
 ALTER TABLE IF EXISTS messages
     ALTER COLUMN is_deleted_by_sender SET NOT NULL,
     ALTER COLUMN is_deleted_by_recipient SET NOT NULL;
+
+-- ============================================================================
+-- MIGRATION: Normalize foreign keys for safe account deletion
+-- ============================================================================
+-- `CREATE TABLE IF NOT EXISTS` does not repair foreign keys on an existing
+-- database. Run this section on older databases so user deletion works with
+-- messaging history and management audit records.
+
+ALTER TABLE IF EXISTS programs
+    DROP CONSTRAINT IF EXISTS programs_created_by_fkey;
+
+ALTER TABLE IF EXISTS programs
+    ADD CONSTRAINT programs_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS trainer_programs
+    DROP CONSTRAINT IF EXISTS trainer_programs_assigned_by_fkey;
+
+ALTER TABLE IF EXISTS trainer_programs
+    ADD CONSTRAINT trainer_programs_assigned_by_fkey
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS trainer_programs
+    DROP CONSTRAINT IF EXISTS trainer_programs_approved_by_fkey;
+
+ALTER TABLE IF EXISTS trainer_programs
+    ADD CONSTRAINT trainer_programs_approved_by_fkey
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS messages
+    DROP CONSTRAINT IF EXISTS messages_sender_id_fkey,
+    DROP CONSTRAINT IF EXISTS messages_recipient_id_fkey,
+    DROP CONSTRAINT IF EXISTS messages_reply_to_id_fkey;
+
+ALTER TABLE IF EXISTS messages
+    ADD CONSTRAINT messages_sender_id_fkey
+        FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    ADD CONSTRAINT messages_recipient_id_fkey
+        FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+    ADD CONSTRAINT messages_reply_to_id_fkey
+        FOREIGN KEY (reply_to_id) REFERENCES messages(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS message_attachments
+    DROP CONSTRAINT IF EXISTS message_attachments_message_id_fkey;
+
+ALTER TABLE IF EXISTS message_attachments
+    ADD CONSTRAINT message_attachments_message_id_fkey
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS message_notifications
+    DROP CONSTRAINT IF EXISTS message_notifications_user_id_fkey,
+    DROP CONSTRAINT IF EXISTS message_notifications_message_id_fkey;
+
+ALTER TABLE IF EXISTS message_notifications
+    ADD CONSTRAINT message_notifications_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    ADD CONSTRAINT message_notifications_message_id_fkey
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE;
