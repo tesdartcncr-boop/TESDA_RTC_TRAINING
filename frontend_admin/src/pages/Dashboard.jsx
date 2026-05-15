@@ -46,7 +46,7 @@ export default function Dashboard() {
           title: 'Create Teaching Load',
           description: 'Assign a qualified trainer and generate the weekday calendar.',
           icon: Briefcase,
-          action: () => navigate('/teaching-loads', { state: { openCreateModal: true } }),
+          action: () => navigate('/schedules', { state: { openCreateModal: true } }),
         },
       ]
     : [
