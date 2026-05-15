@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { BarChart3, Briefcase, ClipboardCheck, PlusCircle, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 
 export default function Dashboard() {

@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { jwtDecode } from 'jwt-decode'
+import jwtDecode from 'jwt-decode'
 import { normalizeApiError } from '../utils/apiErrors'
 
 const AuthContext = createContext()
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const PERSISTENT_TOKEN_KEY = 'management_token'
 const SESSION_TOKEN_KEY = 'management_session_token'
 const REQUEST_TIMEOUT_MS = 15000

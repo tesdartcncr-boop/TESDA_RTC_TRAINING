@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import ModalShell from './ModalShell'
 import { cacheManager } from '../utils/cacheManager'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },

@@ -4,7 +4,7 @@ import { BarChart3, CheckCircle2, Clock3, Users, Calendar, Filter } from 'lucide
 import toast from 'react-hot-toast'
 import { cacheManager } from '../utils/cacheManager'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 
 function StatBar({ label, value, total, color }) {

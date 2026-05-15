@@ -5,7 +5,7 @@ import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
 import { getSocket, registerUser } from '../utils/socket'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const FALLBACK_ADMINS = [
   { id: 1, full_name: 'System Administrator', user_type: 'admin', email: 'admin@rtc.local' },
   { id: 2, full_name: 'Supervisor', user_type: 'supervisor', email: 'supervisor@rtc.local' },

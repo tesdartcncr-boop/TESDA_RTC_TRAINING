@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Bell, Mail, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 
 export default function MessageNotifications() {

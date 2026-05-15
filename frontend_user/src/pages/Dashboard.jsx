@@ -5,7 +5,7 @@ import TrainerScheduleView from '../components/TrainerScheduleView'
 import { cacheManager } from '../utils/cacheManager'
 import { getSocket, registerUser } from '../utils/socket'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
 
 export default function Dashboard() {
