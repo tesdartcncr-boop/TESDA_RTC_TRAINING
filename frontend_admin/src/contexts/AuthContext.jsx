@@ -69,7 +69,7 @@ export const AuthProvider = ({ children }) => {
   const fetchUser = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/auth/me`)
-      if (!['admin', 'supervisor'].includes(response.data.user_type)) {
+      if (response.data.user_type !== 'admin') {
         clearStoredToken()
         delete axios.defaults.headers.common.Authorization
         setUser(null)
@@ -126,9 +126,9 @@ export const AuthProvider = ({ children }) => {
       const response = await axios.post(`${API_BASE}/api/auth/login`, { ...credentials, remember_me: rememberMe })
       const { access_token: accessToken, user: nextUser } = response.data
 
-      if (!['admin', 'supervisor'].includes(nextUser?.user_type)) {
-        toast.error('Use the trainer portal for trainer accounts.')
-        return { success: false, error: 'Use the trainer portal for trainer accounts.' }
+      if (nextUser?.user_type !== 'admin') {
+        toast.error('Only admin accounts can log in here. Supervisors should use the supervisor portal.')
+        return { success: false, error: 'Only admin accounts can log in here. Supervisors should use the supervisor portal.' }
       }
 
       storeToken(accessToken, rememberMe)
