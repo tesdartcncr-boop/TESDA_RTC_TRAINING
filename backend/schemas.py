@@ -59,8 +59,8 @@ class UserResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=6, max_length=128)
     remember_me: bool = False
 
 
@@ -80,8 +80,8 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirm(BaseModel):
     email: EmailStr
-    otp_code: str = Field(min_length=6, max_length=6)
-    new_password: str = Field(min_length=6)
+    otp_code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class OTPRequest(BaseModel):
@@ -90,7 +90,7 @@ class OTPRequest(BaseModel):
 
 class OTPVerify(BaseModel):
     email: EmailStr
-    otp_code: str
+    otp_code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class TrainerQualificationInput(BaseModel):
@@ -371,4 +371,3 @@ class AdminUserResponse(BaseModel):
 
     class Config:
         from_attributes = True
-

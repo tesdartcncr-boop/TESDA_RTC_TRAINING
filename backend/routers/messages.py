@@ -10,7 +10,7 @@ from ..schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from ..supabase_rest import SupabaseAPIError, insert_row, select_rows, select_one, update_row
+from ..supabase_rest import SupabaseAPIError, get_public_error_message, insert_row, select_rows, select_one, update_row
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -51,7 +51,7 @@ def _normalize_message_type(message_type: str | None) -> str:
 
 def raise_supabase_http(exc: SupabaseAPIError):
     status_code = exc.status_code if 400 <= exc.status_code < 600 else status.HTTP_500_INTERNAL_SERVER_ERROR
-    raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=status_code, detail=get_public_error_message(exc)) from exc
 
 
 def get_user_or_404(user_id: int) -> dict:

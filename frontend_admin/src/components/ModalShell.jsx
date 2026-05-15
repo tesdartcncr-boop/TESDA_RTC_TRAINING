@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
 import PropTypes from 'prop-types'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 export default function ModalShell({ title, onClose, children, maxWidth = 'max-w-3xl' }) {
@@ -13,10 +14,32 @@ export default function ModalShell({ title, onClose, children, maxWidth = 'max-w
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/80 p-4">
+  useEffect(() => {
+    const previousHtmlOverflow = document.documentElement.style.overflow
+    const previousBodyOverflow = document.body.style.overflow
+
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow
+      document.body.style.overflow = previousBodyOverflow
+    }
+  }, [])
+
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return createPortal(
+    <div className="fixed left-0 top-0 z-[1000] flex h-[100dvh] w-screen items-center justify-center overflow-y-auto bg-slate-950/80 p-4 sm:p-6">
       <button type="button" aria-label="Close modal overlay" className="absolute inset-0" onClick={onClose} />
-      <div className={`relative z-10 w-full ${maxWidth} overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.35)]`}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`relative z-10 my-auto w-full ${maxWidth} overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.35)]`}
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
           <h3 className="text-xl font-bold text-slate-900">{title}</h3>
           <button
@@ -27,9 +50,10 @@ export default function ModalShell({ title, onClose, children, maxWidth = 'max-w
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[80vh] overflow-y-auto p-6">{children}</div>
+        <div className="max-h-[calc(100dvh-8rem)] overflow-y-auto p-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

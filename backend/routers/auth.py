@@ -24,7 +24,7 @@ from ..schemas import (
     TrainerResponse,
     UserResponse,
 )
-from ..supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, update_row
+from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, insert_row, select_one, update_row
 
 env_path = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(env_path)
@@ -48,7 +48,7 @@ OTP_EMAIL_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "send_otp_e
 
 def raise_supabase_http(exc: SupabaseAPIError):
     status_code = exc.status_code if 400 <= exc.status_code < 600 else status.HTTP_500_INTERNAL_SERVER_ERROR
-    raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=status_code, detail=get_public_error_message(exc)) from exc
 
 
 def _prehash_password(password: str) -> bytes:

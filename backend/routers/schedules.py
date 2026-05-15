@@ -14,7 +14,7 @@ from ..schedule_utils import (
 )
 from ..schemas import ScheduleHoursUpdate, ScheduleUpdate, TeachingLoadApprovalUpdate
 from ..socket_manager import broadcast_schedule_update, send_notification_to_user
-from ..supabase_rest import SupabaseAPIError, delete_rows, select_one, select_rows, update_row
+from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, select_one, select_rows, update_row
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def clear_schedule_caches():
 
 def raise_supabase_http(exc: SupabaseAPIError):
     status_code = exc.status_code if 400 <= exc.status_code < 600 else status.HTTP_500_INTERNAL_SERVER_ERROR
-    raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=status_code, detail=get_public_error_message(exc)) from exc
 
 
 def get_trainer_or_404(trainer_id: int) -> dict:

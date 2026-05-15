@@ -33,6 +33,22 @@ class SupabaseAPIError(Exception):
         self.details = details
 
 
+def get_public_error_message(exc: "SupabaseAPIError") -> str:
+    if exc.status_code == 401:
+        return "Authentication failed. Please sign in again."
+    if exc.status_code == 403:
+        return "You do not have permission to perform this action."
+    if exc.status_code == 404:
+        return "The requested record could not be found."
+    if exc.status_code == 409:
+        return "A conflicting record already exists."
+    if exc.status_code == 422:
+        return "The request data is invalid. Please review your input and try again."
+    if exc.status_code >= 500:
+        return "The service is temporarily unavailable. Please try again in a moment."
+    return exc.message or "The request could not be completed."
+
+
 def _serialize(value: Any):
     if isinstance(value, datetime):
         return value.isoformat()

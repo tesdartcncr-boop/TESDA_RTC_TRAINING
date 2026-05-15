@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .auth import get_current_user
 from ..cache_manager import cache_manager
 from ..schemas import ProgramCreate, ProgramResponse, ProgramUpdate
-from ..supabase_rest import SupabaseAPIError, count_rows, insert_row, select_one, select_rows, update_row
+from ..supabase_rest import SupabaseAPIError, count_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ ORDER_DESC = "created_at.desc"
 
 def raise_supabase_http(exc: SupabaseAPIError):
     status_code = exc.status_code if 400 <= exc.status_code < 600 else status.HTTP_500_INTERNAL_SERVER_ERROR
-    raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=status_code, detail=get_public_error_message(exc)) from exc
 
 
 def normalize_program_payload(payload: dict[str, Any]) -> dict[str, Any]:

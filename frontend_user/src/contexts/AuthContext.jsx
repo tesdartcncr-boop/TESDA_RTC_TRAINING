@@ -3,11 +3,15 @@ import PropTypes from 'prop-types'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
+import { normalizeApiError } from '../utils/apiErrors'
 
 const AuthContext = createContext()
 const API_BASE = 'http://localhost:5000'
 const PERSISTENT_TOKEN_KEY = 'trainer_token'
 const SESSION_TOKEN_KEY = 'trainer_session_token'
+const REQUEST_TIMEOUT_MS = 15000
+
+axios.defaults.timeout = REQUEST_TIMEOUT_MS
 
 const getStoredToken = () => {
   // Try localStorage first (remember me)
@@ -136,9 +140,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('Login successful')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Login failed'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Login failed')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 
@@ -155,9 +161,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('OTP sent to your email')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to send OTP'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Failed to send OTP')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 
@@ -171,9 +179,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('Password reset successful')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to reset password'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Failed to reset password')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 
@@ -184,9 +194,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('Profile updated successfully')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to update profile'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Failed to update profile')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 

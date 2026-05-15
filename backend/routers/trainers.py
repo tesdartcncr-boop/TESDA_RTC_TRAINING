@@ -15,7 +15,7 @@ from ..schemas import (
     TrainerUpdate,
 )
 from ..socket_manager import broadcast_schedule_update, broadcast_trainer_update, send_notification_to_user
-from ..supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_one, select_rows, update_row
+from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
 
 router = APIRouter()
 
@@ -29,7 +29,7 @@ CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 def raise_supabase_http(exc: SupabaseAPIError):
     status_code = exc.status_code if 400 <= exc.status_code < 600 else status.HTTP_500_INTERNAL_SERVER_ERROR
-    raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=status_code, detail=get_public_error_message(exc)) from exc
 
 
 def ensure_admin(current_user: dict):

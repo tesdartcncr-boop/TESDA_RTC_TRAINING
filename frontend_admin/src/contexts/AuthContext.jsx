@@ -2,11 +2,15 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
+import { normalizeApiError } from '../utils/apiErrors'
 
 const AuthContext = createContext()
 const API_BASE = 'http://localhost:5000'
 const PERSISTENT_TOKEN_KEY = 'management_token'
 const SESSION_TOKEN_KEY = 'management_session_token'
+const REQUEST_TIMEOUT_MS = 15000
+
+axios.defaults.timeout = REQUEST_TIMEOUT_MS
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
@@ -133,9 +137,11 @@ export const AuthProvider = ({ children }) => {
       toast.success(`Welcome, ${nextUser.full_name || nextUser.username}`)
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Login failed'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Login failed')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 
@@ -152,9 +158,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('OTP sent to your email')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to send OTP'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Failed to send OTP')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 
@@ -168,9 +176,11 @@ export const AuthProvider = ({ children }) => {
       toast.success('Password updated successfully')
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to reset password'
-      toast.error(message)
-      return { success: false, error: message }
+      const apiError = normalizeApiError(error, 'Failed to reset password')
+      if (apiError.shouldToast) {
+        toast.error(apiError.message)
+      }
+      return { success: false, error: apiError.message, kind: apiError.kind }
     }
   }
 

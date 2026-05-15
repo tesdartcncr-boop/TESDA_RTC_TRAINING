@@ -11,13 +11,22 @@
     --brand-b: #2563eb;
   }
 
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  html,
   body {
+    margin: 0;
     @apply text-gray-900;
     background:
       radial-gradient(70rem 35rem at 0% 0%, rgba(56, 189, 248, 0.15), transparent 70%),
       radial-gradient(60rem 30rem at 100% 20%, rgba(37, 99, 235, 0.12), transparent 70%),
       var(--surface-bg);
     min-height: 100vh;
+    overflow-x: hidden;
   }
 
   * {
