@@ -62,12 +62,25 @@ def build_trainer_name(payload: dict[str, Any]) -> str | None:
     if trainer_name:
         return trainer_name
 
-    parts = [
-        payload.get("first_name"),
-        payload.get("middle_name"),
-        payload.get("last_name"),
-    ]
-    name = " ".join(part.strip() for part in parts if part and part.strip()).strip()
+    # Build name in the format: Surname, Firstname Middlename
+    last = (payload.get("last_name") or "").strip()
+    first = (payload.get("first_name") or "").strip()
+    middle = (payload.get("middle_name") or "").strip()
+
+    name_parts: list[str] = []
+    if last:
+        name_parts.append(last)
+
+    if first:
+        # add comma after surname when first name exists
+        if name_parts:
+            name_parts[-1] = f"{name_parts[-1]},"
+        name_parts.append(first)
+
+    if middle:
+        name_parts.append(middle)
+
+    name = " ".join(name_parts).strip()
     if payload.get("extension"):
         name = f"{name} {payload['extension'].strip()}".strip()
     return name or None
