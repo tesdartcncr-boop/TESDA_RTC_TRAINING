@@ -1,6 +1,7 @@
 """
 Redis cache manager for caching API responses
 """
+import os
 import redis
 import json
 import logging
@@ -10,18 +11,26 @@ from datetime import timedelta
 logger = logging.getLogger(__name__)
 
 class CacheManager:
-    def __init__(self, host: str = 'localhost', port: int = 6379, db: int = 0, ttl_minutes: int = 30):
+    def __init__(self, redis_url: str | None = None, host: str = 'localhost', port: int = 6379, db: int = 0, ttl_minutes: int = 30):
         """
         Initialize Redis cache manager
         
         Args:
+            redis_url: Redis connection URL. If missing, cache is disabled.
             host: Redis server host
             port: Redis server port
             db: Redis database number
             ttl_minutes: Default time to live for cache entries in minutes
         """
+        if not redis_url:
+            self.redis_client = None
+            self.ttl = timedelta(minutes=ttl_minutes)
+            self.enabled = False
+            logger.info("Redis cache not configured; cache disabled.")
+            return
+
         try:
-            self.redis_client = redis.Redis(host=host, port=port, db=db, decode_responses=True)
+            self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
             self.redis_client.ping()
             self.ttl = timedelta(minutes=ttl_minutes)
             self.enabled = True
@@ -43,7 +52,7 @@ class CacheManager:
             logger.debug(f"Cache miss for key: {key}")
             return None
         except Exception as e:
-            logger.error(f"Error retrieving from cache: {e}")
+            logger.exception("Error retrieving from cache: %s", e)
             return None
 
     def set(self, key: str, value: Any, ttl: Optional[timedelta] = None) -> bool:
@@ -56,7 +65,7 @@ class CacheManager:
             logger.debug(f"Cache set for key: {key}")
             return True
         except Exception as e:
-            logger.error(f"Error setting cache: {e}")
+            logger.exception("Error setting cache: %s", e)
             return False
 
     def delete(self, key: str) -> bool:
@@ -68,7 +77,7 @@ class CacheManager:
             logger.debug(f"Cache deleted for key: {key}")
             return True
         except Exception as e:
-            logger.error(f"Error deleting from cache: {e}")
+            logger.exception("Error deleting from cache: %s", e)
             return False
 
     def clear_pattern(self, pattern: str) -> int:
@@ -83,7 +92,7 @@ class CacheManager:
                 return deleted
             return 0
         except Exception as e:
-            logger.error(f"Error clearing cache pattern: {e}")
+            logger.exception("Error clearing cache pattern: %s", e)
             return 0
 
     def clear_all(self) -> bool:
@@ -95,7 +104,7 @@ class CacheManager:
             logger.info("All cache cleared")
             return True
         except Exception as e:
-            logger.error(f"Error clearing all cache: {e}")
+            logger.exception("Error clearing all cache: %s", e)
             return False
 
     def get_cache_key(self, prefix: str, **kwargs) -> str:
@@ -105,4 +114,4 @@ class CacheManager:
 
 
 # Global cache manager instance
-cache_manager = CacheManager()
+cache_manager = CacheManager(redis_url=os.getenv("REDIS_URL"))
