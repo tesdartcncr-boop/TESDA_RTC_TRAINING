@@ -1,4 +1,5 @@
 import bcrypt
+import json
 import hashlib
 import logging
 import os
@@ -10,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Annotated
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -46,6 +49,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 REMEMBER_ME_EXPIRE_DAYS = int(os.getenv("REMEMBER_ME_EXPIRE_DAYS", "30"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 SMTP_CONNECT_TIMEOUT_SECONDS = int(os.getenv("SMTP_CONNECT_TIMEOUT_SECONDS", "8"))
+EMAIL_PROVIDER = (os.getenv("EMAIL_PROVIDER") or "smtp").strip().lower()
+BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()
+BREVO_SENDER_EMAIL = (os.getenv("BREVO_SENDER_EMAIL") or "").strip()
+BREVO_SENDER_NAME = (os.getenv("BREVO_SENDER_NAME") or "Trainer Portal").strip() or "Trainer Portal"
+OTP_EMAIL_NOT_CONFIGURED_MESSAGE = "OTP email service is not configured on the server."
+OTP_EMAIL_TEMPORARILY_UNAVAILABLE_MESSAGE = "OTP email service is temporarily unavailable on the server. Please try again later."
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -120,6 +129,30 @@ def _smtp_ports_to_try(configured_port: int) -> list[int]:
     return ports
 
 
+def _build_otp_email_content(otp_code: str) -> tuple[str, str]:
+    text_content = f"Your Trainer Portal OTP code is {otp_code}. It expires in {OTP_EXPIRY_MINUTES} minutes."
+    html_content = f"""
+        <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+          <h2 style="margin-bottom: 16px;">Trainer Portal - OTP Verification</h2>
+          <p>Your OTP code is: <strong style="font-size: 20px;">{otp_code}</strong></p>
+          <p>This code will expire in {OTP_EXPIRY_MINUTES} minutes.</p>
+          <p>If you did not request this OTP, you can ignore this email.</p>
+        </div>
+    """
+    return text_content, html_content
+
+
+def _build_otp_email_message(email: str, otp_code: str, sender_email: str) -> EmailMessage:
+    text_content, html_content = _build_otp_email_content(otp_code)
+    message = EmailMessage()
+    message["Subject"] = "Trainer Portal - OTP Verification"
+    message["From"] = sender_email
+    message["To"] = email
+    message.set_content(text_content)
+    message.add_alternative(html_content, subtype="html")
+    return message
+
+
 def _send_otp_via_smtp_port(
     smtp_host: str,
     smtp_port: int,
@@ -143,7 +176,57 @@ def _send_otp_via_smtp_port(
         server.send_message(message)
 
 
+def _send_otp_via_brevo(email: str, otp_code: str):
+    if not BREVO_API_KEY or not BREVO_SENDER_EMAIL:
+        logger.error("BREVO_API_KEY and BREVO_SENDER_EMAIL must be set.")
+        return False, OTP_EMAIL_NOT_CONFIGURED_MESSAGE
+
+    text_content, html_content = _build_otp_email_content(otp_code)
+    payload = {
+        "sender": {
+            "name": BREVO_SENDER_NAME,
+            "email": BREVO_SENDER_EMAIL,
+        },
+        "to": [{"email": email}],
+        "subject": "Trainer Portal - OTP Verification",
+        "textContent": text_content,
+        "htmlContent": html_content,
+    }
+
+    request = Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key": BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=SMTP_CONNECT_TIMEOUT_SECONDS) as response:
+            response_body = response.read().decode("utf-8", errors="ignore")
+            logger.info("Brevo OTP response: %s", response_body or response.status)
+        return True, None
+    except HTTPError as exc:
+        response_body = exc.read().decode("utf-8", errors="ignore") if exc.fp else ""
+        logger.exception("Brevo API error (%s): %s", exc.code, response_body or exc.reason)
+        if exc.code in {401, 403}:
+            return False, OTP_EMAIL_NOT_CONFIGURED_MESSAGE
+        return False, OTP_EMAIL_TEMPORARILY_UNAVAILABLE_MESSAGE
+    except URLError as exc:
+        logger.warning("Brevo connection failed: %s", exc)
+        return False, OTP_EMAIL_TEMPORARILY_UNAVAILABLE_MESSAGE
+    except Exception as exc:
+        logger.exception("Failed to send OTP email via Brevo: %s", exc)
+        return False, OTP_EMAIL_TEMPORARILY_UNAVAILABLE_MESSAGE
+
+
 def send_otp_email(email: str, otp_code: str):
+    if EMAIL_PROVIDER == "brevo":
+        return _send_otp_via_brevo(email, otp_code)
+
     smtp_host = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port_raw = os.getenv("SMTP_PORT", "587")
     smtp_username = (os.getenv("SMTP_USERNAME") or "").strip()
@@ -151,32 +234,15 @@ def send_otp_email(email: str, otp_code: str):
 
     if not smtp_username or not smtp_password:
         logger.error("SMTP_USERNAME and SMTP_PASSWORD must be set.")
-        return False, "OTP email service is not configured on the server."
+        return False, OTP_EMAIL_NOT_CONFIGURED_MESSAGE
 
     try:
         smtp_port = int(smtp_port_raw)
     except ValueError:
         logger.error("Invalid SMTP_PORT value: %s", smtp_port_raw)
-        return False, "OTP email service is not configured on the server."
+        return False, OTP_EMAIL_NOT_CONFIGURED_MESSAGE
 
-    message = EmailMessage()
-    message["Subject"] = "Trainer Portal - OTP Verification"
-    message["From"] = smtp_username
-    message["To"] = email
-    message.set_content(
-        f"Your Trainer Portal OTP code is {otp_code}. It expires in {OTP_EXPIRY_MINUTES} minutes."
-    )
-    message.add_alternative(
-        f"""
-        <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
-          <h2 style="margin-bottom: 16px;">Trainer Portal - OTP Verification</h2>
-          <p>Your OTP code is: <strong style="font-size: 20px;">{otp_code}</strong></p>
-          <p>This code will expire in {OTP_EXPIRY_MINUTES} minutes.</p>
-          <p>If you did not request this OTP, you can ignore this email.</p>
-        </div>
-        """,
-        subtype="html",
-    )
+    message = _build_otp_email_message(email, otp_code, smtp_username)
 
     last_error: Exception | None = None
     for current_port in _smtp_ports_to_try(smtp_port):
@@ -197,7 +263,7 @@ def send_otp_email(email: str, otp_code: str):
             continue
 
     logger.error("All SMTP ports failed for OTP email: %s", last_error)
-    return False, "OTP email service is temporarily unavailable on the server. Please try again later."
+    return False, OTP_EMAIL_TEMPORARILY_UNAVAILABLE_MESSAGE
 
 
 def generate_otp() -> str:
