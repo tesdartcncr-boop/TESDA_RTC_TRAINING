@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -185,6 +185,7 @@ export default function Trainers() {
   const [createQualifications, setCreateQualifications] = useState([])
   const [editQualifications, setEditQualifications] = useState([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const originalEditQualificationsRef = useRef([])
 
   const createForm = useForm({ defaultValues: emptyTrainerValues })
   const editForm = useForm({ defaultValues: emptyTrainerValues })
@@ -273,6 +274,13 @@ export default function Trainers() {
     return qualifications
   }
 
+  const qualificationSignature = (qualifications) => (
+    [...qualifications]
+      .map((qualification) => `${qualification.program_id}:${qualification.nttc_number || ''}`)
+      .sort((left, right) => left.localeCompare(right))
+      .join('|')
+  )
+
   useEffect(() => {
     loadTrainers()
   }, [searchTerm])
@@ -332,31 +340,30 @@ export default function Trainers() {
     }
   }
 
-  const syncQualifications = async (trainerId, desiredQualifications) => {
-    const currentQualifications = await loadQualifications(trainerId)
+  const syncQualifications = async (trainerId, desiredQualifications, currentQualifications) => {
     const currentIds = currentQualifications.map((qualification) => qualification.program_id)
     const desiredIds = new Set(desiredQualifications.map((qualification) => qualification.program_id))
 
-    const toAddOrUpdate = desiredQualifications
+    const toUpsert = desiredQualifications.filter((qualification) => {
+      const current = currentQualifications.find((item) => item.program_id === qualification.program_id)
+      return !current || current.nttc_number !== qualification.nttc_number
+    })
     const toRemove = currentIds.filter((programId) => !desiredIds.has(programId))
 
-    for (const qualification of toAddOrUpdate) {
-      await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
+    await Promise.all([
+      ...toUpsert.map((qualification) => fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getToken()}`,
         },
         body: JSON.stringify(qualification),
-      })
-    }
-
-    for (const programId of toRemove) {
-      await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications/${programId}`, {
+      })),
+      ...toRemove.map((programId) => fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications/${programId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${getToken()}` },
-      })
-    }
+      })),
+    ])
 
     cacheManager.clearPattern('trainer_qualifications:')
   }
@@ -378,7 +385,9 @@ export default function Trainers() {
       nttc_expiration: trainer.nttc_expiration ? trainer.nttc_expiration.split('T')[0] : '',
       ctpr_recognition_number: trainer.ctpr_recognition_number || '',
     })
-    setEditQualifications(await loadQualifications(trainer.id))
+    const qualifications = await loadQualifications(trainer.id)
+    setEditQualifications(qualifications)
+    originalEditQualificationsRef.current = qualifications
   }
 
   const handleUpdate = async (values) => {
@@ -429,7 +438,10 @@ export default function Trainers() {
         }
       }
 
-      await syncQualifications(editingTrainer.id, editQualifications)
+      const originalQualifications = originalEditQualificationsRef.current
+      if (qualificationSignature(editQualifications) !== qualificationSignature(originalQualifications)) {
+        await syncQualifications(editingTrainer.id, editQualifications, originalQualifications)
+      }
       toast.success('Trainer updated successfully')
       invalidateTrainerCaches()
       setEditingTrainer(null)
@@ -463,23 +475,33 @@ export default function Trainers() {
     }
   }
 
-  const renderTrainerForm = (form, qualifications, setQualifications, isEdit = false) => (
-    <form className="space-y-6" onSubmit={form.handleSubmit(isEdit ? handleUpdate : handleCreate)}>
-      <TrainerFormFields form={form} isEdit={isEdit} />
+  const renderTrainerForm = (form, qualifications, setQualifications, isEdit = false) => {
+    let submitLabel = 'Create Trainer'
+    if (isEdit) {
+      submitLabel = 'Update Trainer'
+    }
+    if (isProcessing) {
+      submitLabel = 'Processing...'
+    }
 
-      <QualificationSelector
-        programs={programs}
-        selectedQualifications={qualifications}
-        setSelectedQualifications={setQualifications}
-      />
+    return (
+      <form className="space-y-6" onSubmit={form.handleSubmit(isEdit ? handleUpdate : handleCreate)}>
+        <TrainerFormFields form={form} isEdit={isEdit} />
 
-      <div className="flex justify-end gap-3">
-        <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
-          {isProcessing ? 'Processing...' : (isEdit ? 'Update Trainer' : 'Create Trainer')}
-        </button>
-      </div>
-    </form>
-  )
+        <QualificationSelector
+          programs={programs}
+          selectedQualifications={qualifications}
+          setSelectedQualifications={setQualifications}
+        />
+
+        <div className="flex justify-end gap-3">
+          <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
+            {submitLabel}
+          </button>
+        </div>
+      </form>
+    )
+  }
 
   return (
     <div className="space-y-6">

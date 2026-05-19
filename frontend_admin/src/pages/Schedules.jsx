@@ -36,6 +36,7 @@ export default function Schedules() {
   const [trainers, setTrainers] = useState([])
   const [eligiblePrograms, setEligiblePrograms] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [expiredTrainer, setExpiredTrainer] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -171,6 +172,32 @@ export default function Schedules() {
     }
   }
 
+  const isTmExpired = (tmExpiration) => {
+    if (!tmExpiration) return false
+    const expiryDate = new Date(tmExpiration)
+    if (Number.isNaN(expiryDate.getTime())) return false
+    expiryDate.setHours(23, 59, 59, 999)
+    return expiryDate.getTime() < Date.now()
+  }
+
+  const handleTrainerChange = (event) => {
+    const trainerId = event.target.value
+    const selectedTrainer = trainers.find((trainer) => String(trainer.id) === String(trainerId))
+
+    if (selectedTrainer && isTmExpired(selectedTrainer.tm_expiration)) {
+      setExpiredTrainer(selectedTrainer)
+      createForm.setValue('trainer_id', '')
+      createForm.setValue('program_id', '')
+      setEligiblePrograms([])
+      event.target.value = ''
+      return
+    }
+
+    createForm.setValue('trainer_id', trainerId)
+    createForm.setValue('program_id', '')
+    loadEligiblePrograms(trainerId)
+  }
+
   useEffect(() => {
     loadAssignments()
   }, [statusFilter])
@@ -194,6 +221,13 @@ export default function Schedules() {
   }, [assignments, statusFilter])
 
   const handleCreate = async (values) => {
+    const selectedTrainer = trainers.find((trainer) => String(trainer.id) === String(values.trainer_id))
+    if (selectedTrainer && isTmExpired(selectedTrainer.tm_expiration)) {
+      setExpiredTrainer(selectedTrainer)
+      toast.error('TM is expired. This trainer cannot be assigned a teaching load.')
+      return
+    }
+
     setIsProcessing(true)
     try {
       const response = await fetch(`${API_BASE}/api/trainers/${values.trainer_id}/programs`, {
@@ -438,11 +472,7 @@ export default function Schedules() {
               <select
                 id="teaching_load_trainer"
                 {...createForm.register('trainer_id', { required: true })}
-                onChange={(event) => {
-                  createForm.setValue('trainer_id', event.target.value)
-                  createForm.setValue('program_id', '')
-                  loadEligiblePrograms(event.target.value)
-                }}
+                onChange={handleTrainerChange}
                 className={`${fieldClassName} mt-2`}
               >
                 <option value="">Select trainer</option>
@@ -483,6 +513,28 @@ export default function Schedules() {
               <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isProcessing ? 'Processing...' : 'Assign Load'}</button>
             </div>
           </form>
+        </ModalShell>
+      )}
+
+      {expiredTrainer && (
+        <ModalShell title="TM Expired" onClose={() => setExpiredTrainer(null)} maxWidth="max-w-lg">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">
+              {expiredTrainer.trainer_name || expiredTrainer.username} cannot be assigned a teaching load because the TM is expired.
+            </p>
+            <p className="text-sm font-semibold text-rose-600">
+              TM Expiration: {expiredTrainer.tm_expiration ? expiredTrainer.tm_expiration.split('T')[0] : 'Not set'}
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setExpiredTrainer(null)}
+                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>

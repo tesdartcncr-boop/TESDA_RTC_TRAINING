@@ -471,6 +471,19 @@ async def assign_program_to_trainer(
 
     try:
         trainer = get_trainer_or_404(trainer_id)
+        tm_expiration = trainer.get("tm_expiration")
+        if tm_expiration:
+            if isinstance(tm_expiration, datetime):
+                tm_expiration_date = tm_expiration.date()
+            elif isinstance(tm_expiration, date):
+                tm_expiration_date = tm_expiration
+            else:
+                tm_expiration_date = datetime.fromisoformat(str(tm_expiration)).date()
+            if tm_expiration_date < date.today():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Trainer's TM is expired.",
+                )
         program = get_program_or_404(assignment.program_id)
         qualification = select_one(
             "trainer_qualifications",

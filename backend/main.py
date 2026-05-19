@@ -41,7 +41,8 @@ DEFAULT_CORS_ORIGINS = [
 def get_cors_origins():
     raw_origins = os.getenv("CORS_ORIGINS", "")
     configured = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-    return configured or DEFAULT_CORS_ORIGINS
+    origins = list(dict.fromkeys(DEFAULT_CORS_ORIGINS + configured))
+    return origins
 
 
 # CORS configuration
