@@ -154,7 +154,11 @@ export const AuthProvider = ({ children }) => {
 
   const requestPasswordReset = async (email) => {
     try {
-      await axios.post(`${API_BASE}/api/auth/password-reset/request`, { email })
+      await axios.post(
+        `${API_BASE}/api/auth/password-reset/request`,
+        { email },
+        { timeout: 30000 }
+      )
       toast.success('OTP sent to your email')
       return { success: true }
     } catch (error) {

@@ -45,6 +45,7 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REMEMBER_ME_EXPIRE_DAYS = int(os.getenv("REMEMBER_ME_EXPIRE_DAYS", "30"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
+SMTP_CONNECT_TIMEOUT_SECONDS = int(os.getenv("SMTP_CONNECT_TIMEOUT_SECONDS", "8"))
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -102,6 +103,46 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def _build_smtp_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_default_certs()
+    return context
+
+
+def _smtp_ports_to_try(configured_port: int) -> list[int]:
+    ports = [configured_port]
+    for fallback_port in (465, 587):
+        if fallback_port not in ports:
+            ports.append(fallback_port)
+    return ports
+
+
+def _send_otp_via_smtp_port(
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    message: EmailMessage,
+):
+    context = _build_smtp_context()
+
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=SMTP_CONNECT_TIMEOUT_SECONDS, context=context) as server:
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+        return
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=SMTP_CONNECT_TIMEOUT_SECONDS) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(smtp_username, smtp_password)
+        server.send_message(message)
+
+
 def send_otp_email(email: str, otp_code: str):
     smtp_host = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port_raw = os.getenv("SMTP_PORT", "587")
@@ -137,34 +178,26 @@ def send_otp_email(email: str, otp_code: str):
         subtype="html",
     )
 
-    try:
-        if smtp_port == 465:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-            context.check_hostname = True
-            context.verify_mode = ssl.CERT_REQUIRED
-            context.load_default_certs()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30, context=context) as server:
-                server.login(smtp_username, smtp_password)
-                server.send_message(message)
-        else:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-            context.check_hostname = True
-            context.verify_mode = ssl.CERT_REQUIRED
-            context.load_default_certs()
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-                server.ehlo()
-                server.starttls(context=context)
-                server.ehlo()
-                server.login(smtp_username, smtp_password)
-                server.send_message(message)
+    last_error: Exception | None = None
+    for current_port in _smtp_ports_to_try(smtp_port):
+        try:
+            _send_otp_via_smtp_port(smtp_host, current_port, smtp_username, smtp_password, message)
+            logger.info("OTP email sent successfully via SMTP port %s", current_port)
+            return True, None
+        except smtplib.SMTPAuthenticationError:
+            logger.exception("SMTP authentication failed while sending OTP email")
+            return False, "Unable to send OTP email. Please verify the Gmail app password."
+        except (OSError, smtplib.SMTPServerDisconnected) as exc:
+            last_error = exc
+            logger.warning("SMTP connection attempt on port %s failed: %s", current_port, exc)
+            continue
+        except Exception as exc:
+            last_error = exc
+            logger.exception("Failed to send OTP email via port %s: %s", current_port, exc)
+            continue
 
-        return True, None
-    except smtplib.SMTPAuthenticationError:
-        logger.exception("SMTP authentication failed while sending OTP email")
-        return False, "Unable to send OTP email. Please verify the Gmail app password."
-    except Exception as exc:
-        logger.exception("Failed to send OTP email: %s", exc)
-        return False, "Unable to send OTP email. Please try again."
+    logger.error("All SMTP ports failed for OTP email: %s", last_error)
+    return False, "OTP email service is temporarily unavailable on the server. Please try again later."
 
 
 def generate_otp() -> str:
