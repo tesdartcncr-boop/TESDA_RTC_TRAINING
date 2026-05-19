@@ -4,8 +4,10 @@ import logging
 import os
 import random
 import secrets
-import subprocess
+import smtplib
+import ssl
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Annotated
 
@@ -43,7 +45,6 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REMEMBER_ME_EXPIRE_DAYS = int(os.getenv("REMEMBER_ME_EXPIRE_DAYS", "30"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
-OTP_EMAIL_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "send_otp_email.js"
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -102,24 +103,64 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 def send_otp_email(email: str, otp_code: str):
-    if not OTP_EMAIL_SCRIPT.exists():
-        logger.error("OTP email script not found at %s", OTP_EMAIL_SCRIPT)
+    smtp_host = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+    smtp_port_raw = os.getenv("SMTP_PORT", "587")
+    smtp_username = (os.getenv("SMTP_USERNAME") or "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD") or ""
+
+    if not smtp_username or not smtp_password:
+        logger.error("SMTP_USERNAME and SMTP_PASSWORD must be set.")
         return False, "OTP email service is not configured on the server."
 
     try:
-        result = subprocess.run(
-            ["node", str(OTP_EMAIL_SCRIPT), email, otp_code, str(OTP_EXPIRY_MINUTES)],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-            env=os.environ.copy(),
-        )
-        if result.returncode == 0:
-            return True, None
+        smtp_port = int(smtp_port_raw)
+    except ValueError:
+        logger.error("Invalid SMTP_PORT value: %s", smtp_port_raw)
+        return False, "OTP email service is not configured on the server."
 
-        error_output = (result.stderr or result.stdout or "").strip()
-        logger.error("Failed to send OTP email via Nodemailer: %s", error_output)
+    message = EmailMessage()
+    message["Subject"] = "Trainer Portal - OTP Verification"
+    message["From"] = smtp_username
+    message["To"] = email
+    message.set_content(
+        f"Your Trainer Portal OTP code is {otp_code}. It expires in {OTP_EXPIRY_MINUTES} minutes."
+    )
+    message.add_alternative(
+        f"""
+        <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+          <h2 style="margin-bottom: 16px;">Trainer Portal - OTP Verification</h2>
+          <p>Your OTP code is: <strong style="font-size: 20px;">{otp_code}</strong></p>
+          <p>This code will expire in {OTP_EXPIRY_MINUTES} minutes.</p>
+          <p>If you did not request this OTP, you can ignore this email.</p>
+        </div>
+        """,
+        subtype="html",
+    )
+
+    try:
+        if smtp_port == 465:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            context.load_default_certs()
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30, context=context) as server:
+                server.login(smtp_username, smtp_password)
+                server.send_message(message)
+        else:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            context.load_default_certs()
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
+                server.login(smtp_username, smtp_password)
+                server.send_message(message)
+
+        return True, None
+    except smtplib.SMTPAuthenticationError:
+        logger.exception("SMTP authentication failed while sending OTP email")
         return False, "Unable to send OTP email. Please verify the Gmail app password."
     except Exception as exc:
         logger.exception("Failed to send OTP email: %s", exc)
