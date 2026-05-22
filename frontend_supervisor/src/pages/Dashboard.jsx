@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart3, Briefcase, ClipboardCheck, PlusCircle, Users } from 'lucide-react'
+import { BarChart3, Briefcase, PlusCircle, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
@@ -39,7 +39,7 @@ export default function Dashboard() {
         },
         {
           title: 'Add Program',
-          description: 'Create a new program with type, validity, and total hours.',
+          description: 'Create a new program with type, validity date, and nominal duration.',
           icon: PlusCircle,
           action: () => navigate('/programs', { state: { openCreateModal: true } }),
         },
@@ -52,14 +52,8 @@ export default function Dashboard() {
       ]
     : [
         {
-          title: 'Review Teaching Loads',
-          description: 'Approve or reject pending teaching loads from the queue.',
-          icon: ClipboardCheck,
-          action: () => navigate('/teaching-loads'),
-        },
-        {
-          title: 'Supervisor Accounts',
-          description: 'Review supervisor accounts and manage password updates.',
+          title: 'Center Chief Accounts',
+          description: 'Review center chief accounts and manage password updates.',
           icon: Users,
           action: () => navigate('/admin-accounts?role=supervisor'),
         },
@@ -81,7 +75,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 sm:space-y-8">
       <section className="rounded-[1.5rem] sm:rounded-[2rem] bg-gradient-to-br from-slate-950 via-sky-900 to-cyan-700 p-4 sm:p-6 lg:p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
-        <p className="text-xs sm:text-sm font-bold uppercase tracking-[0.24em] text-sky-100">TESDA RTC NCR</p>
+        <p className="text-xs sm:text-sm font-bold uppercase tracking-[0.24em] text-sky-100">TESDA RTC - NCR</p>
         <h1 className="mt-2 sm:mt-4 text-2xl sm:text-3xl lg:text-4xl font-black leading-tight">
           {user?.user_type === 'admin' ? 'Admin Dashboard' : 'Supervisor Dashboard'}
         </h1>
@@ -127,9 +121,9 @@ export default function Dashboard() {
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-bold text-slate-900">Recent Trainers</h3>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 max-h-[20rem] space-y-3 overflow-y-auto pr-1">
               {(stats.recent_trainers || []).length === 0 && <p className="text-sm text-slate-500">No trainer records yet.</p>}
-              {(stats.recent_trainers || []).map((trainer) => (
+              {(stats.recent_trainers || []).slice(0, 5).map((trainer) => (
                 <div key={trainer.id} className="rounded-2xl border border-slate-200 px-4 py-3">
                   <p className="font-semibold text-slate-900">{trainer.trainer_name || trainer.username}</p>
                   <p className="text-sm text-slate-500">{trainer.first_name || ''} {trainer.last_name || ''}</p>
@@ -140,9 +134,9 @@ export default function Dashboard() {
 
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-bold text-slate-900">Recent Programs</h3>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 max-h-[20rem] space-y-3 overflow-y-auto pr-1">
               {(stats.recent_programs || []).length === 0 && <p className="text-sm text-slate-500">No program records yet.</p>}
-              {(stats.recent_programs || []).map((program) => (
+              {(stats.recent_programs || []).slice(0, 5).map((program) => (
                 <div key={program.id} className="rounded-2xl border border-slate-200 px-4 py-3">
                   <p className="font-semibold text-slate-900">{program.name}</p>
                   <p className="text-sm text-slate-500">{program.type} • {program.hours || 0} hours</p>

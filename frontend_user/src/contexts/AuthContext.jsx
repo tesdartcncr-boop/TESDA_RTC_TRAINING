@@ -4,6 +4,7 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
 import { normalizeApiError } from '../utils/apiErrors'
+import { disconnectSocket } from '../utils/socket'
 
 const AuthContext = createContext()
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
@@ -33,6 +34,7 @@ const getStoredToken = () => {
 }
 
 const clearStoredToken = () => {
+  disconnectSocket()
   localStorage.removeItem(PERSISTENT_TOKEN_KEY)
   sessionStorage.removeItem(SESSION_TOKEN_KEY)
   // Clear any cookies as backup

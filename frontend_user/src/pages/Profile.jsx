@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Mail, Pencil, Save, User, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { cacheManager } from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.getItem('trainer_session_token')
+
+const isExpiredDate = (value) => {
+  if (!value) return false
+  const dateOnly = String(value).split('T')[0]
+  const expiryDate = new Date(`${dateOnly}T00:00:00`)
+  if (Number.isNaN(expiryDate.getTime())) return false
+  expiryDate.setHours(23, 59, 59, 999)
+  return expiryDate.getTime() < Date.now()
+}
 
 export default function Profile() {
   const { user, updateProfile } = useAuth()
@@ -17,6 +25,7 @@ export default function Profile() {
   useEffect(() => {
     form.reset({
       trainer_name: user?.trainer_name || '',
+      sex: user?.sex || '',
       first_name: user?.first_name || '',
       middle_name: user?.middle_name || '',
       last_name: user?.last_name || '',
@@ -30,22 +39,55 @@ export default function Profile() {
     const loadQualifications = async () => {
       if (!user?.id) return
       const trainerId = user.trainer_id || user.id
-      const cacheKey = cacheManager.generateKey('trainer_qualifications', { trainer_id: trainerId })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setQualifications(cached)
-        return
-      }
       const response = await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
       const nextQualifications = data.data || []
       setQualifications(nextQualifications)
-      cacheManager.set(cacheKey, nextQualifications)
     }
     loadQualifications()
   }, [user?.id, user?.trainer_id])
+
+  const qualificationGroups = useMemo(() => {
+    const active = []
+    const expired = []
+
+    for (const qualification of qualifications) {
+      if (isExpiredDate(qualification?.nttc_expiration)) {
+        expired.push(qualification)
+      } else {
+        active.push(qualification)
+      }
+    }
+
+    return { active, expired }
+  }, [qualifications])
+
+  const isTmcExpired = isExpiredDate(user?.tm_expiration)
+  let tmcStatus = 'Not set'
+  if (user?.tm_number) {
+    tmcStatus = isTmcExpired ? 'Expired' : 'Active'
+  }
+
+  const renderProfileField = (field) => {
+    if (!isEditing || field === 'position') {
+      return <p className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">{user?.[field] || 'Not set'}</p>
+    }
+
+    if (field === 'sex') {
+      return (
+        <select {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+          <option value="">Select sex</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          <option value="Prefer not to say">Prefer not to say</option>
+        </select>
+      )
+    }
+
+    return <input {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
+  }
 
   const handleSave = async (values) => {
     setIsLoading(true)
@@ -108,20 +150,17 @@ export default function Profile() {
           <div className="mt-5 grid gap-4">
             {[
               ['Trainer Name', 'trainer_name'],
+              ['Sex', 'sex'],
               ['First Name', 'first_name'],
               ['Middle Name', 'middle_name'],
               ['Last Name', 'last_name'],
               ['Extension', 'extension'],
               ['Trainer Type', 'trainer_type'],
-              ['Recognition Number', 'ctpr_recognition_number'],
+              ['Position', 'position'],
             ].map(([label, field]) => (
               <div key={field}>
                 <label className="block text-sm font-semibold text-slate-700">{label}</label>
-                {isEditing ? (
-                  <input {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
-                ) : (
-                  <p className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">{user?.[field] || 'Not set'}</p>
-                )}
+                {renderProfileField(field)}
               </div>
             ))}
           </div>
@@ -130,14 +169,31 @@ export default function Profile() {
         <div className="space-y-6">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-bold text-slate-900">Qualifications</h2>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {qualifications.length === 0 && <p className="text-sm text-slate-500">No qualifications assigned yet.</p>}
-              {qualifications.map((qualification) => (
-                <span key={qualification.id} className="rounded-full bg-cyan-100 px-4 py-2 text-xs font-bold text-cyan-700">
-                  {qualification.program?.name || 'Unknown'}
-                  {qualification.nttc_number ? ` • NTTC ${qualification.nttc_number}` : ''}
-                </span>
-              ))}
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-600">Active</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {qualificationGroups.active.length === 0 && <p className="text-sm text-slate-500">No active qualifications.</p>}
+                  {qualificationGroups.active.map((qualification) => (
+                    <span key={qualification.id} className="rounded-full bg-emerald-100 px-4 py-2 text-xs font-bold text-emerald-700">
+                      {qualification.program?.name || 'Unknown'}
+                      {qualification.nttc_number ? ` • NTTC ${qualification.nttc_number}` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-rose-600">Expired</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {qualificationGroups.expired.length === 0 && <p className="text-sm text-slate-500">No expired qualifications.</p>}
+                  {qualificationGroups.expired.map((qualification) => (
+                    <span key={qualification.id} className="rounded-full bg-rose-100 px-4 py-2 text-xs font-bold text-rose-700">
+                      {qualification.program?.name || 'Unknown'}
+                      {qualification.nttc_number ? ` • NTTC ${qualification.nttc_number}` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -146,8 +202,11 @@ export default function Profile() {
             <div className="mt-4 grid gap-3 text-sm text-slate-700">
               <p><span className="font-semibold">Username:</span> {user?.username}</p>
               <p><span className="font-semibold">Email:</span> {user?.email}</p>
-              <p><span className="font-semibold">TM Number:</span> {user?.tm_number || 'Not set'}</p>
-              <p><span className="font-semibold">TM Expiration:</span> {user?.tm_expiration ? user.tm_expiration.split('T')[0] : 'Not set'}</p>
+              <p><span className="font-semibold">Sex:</span> {user?.sex || 'Not set'}</p>
+              <p><span className="font-semibold">Position:</span> {user?.position || 'Not set'}</p>
+              <p><span className="font-semibold">TMC Level I Number:</span> {user?.tm_number || 'Not set'}</p>
+              <p><span className="font-semibold">TMC Level I Status:</span> {tmcStatus}</p>
+              <p><span className="font-semibold">TMC Level I Expiration:</span> {user?.tm_expiration ? user.tm_expiration.split('T')[0] : 'Not set'}</p>
             </div>
           </div>
         </div>

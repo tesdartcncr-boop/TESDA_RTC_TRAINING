@@ -306,6 +306,8 @@ def serialize_user(user: dict) -> dict:
         "username": user["username"],
         "email": user["email"],
         "full_name": user.get("full_name"),
+        "sex": user.get("sex"),
+        "position": user.get("position"),
         "user_type": user["user_type"],
         "is_active": user.get("is_active", True),
         "created_at": user.get("created_at"),
@@ -369,7 +371,7 @@ def _select_valid_otp(email: str, otp_code: str, purpose: str):
     )
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def resolve_user_from_token(token: str) -> dict:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -377,12 +379,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     )
 
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+    except JWTError as exc:
+        raise credentials_exception from exc
 
     try:
         user = get_user_by_username(username)
@@ -397,6 +399,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Account is deactivated",
         )
     return user
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    return resolve_user_from_token(credentials.credentials)
 
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
@@ -588,6 +594,8 @@ async def verify_otp(otp_verify: OTPVerify):
                     "username": build_unique_username(normalized_email),
                     "email": normalized_email,
                     "full_name": "OTP Admin",
+                    "sex": None,
+                    "position": None,
                     "password_hash": get_password_hash(generate_internal_password()),
                     "user_type": "admin",
                     "is_active": True,

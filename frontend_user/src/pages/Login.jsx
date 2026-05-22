@@ -157,7 +157,7 @@ export default function Login() {
       <div className="relative mx-auto flex min-h-[calc(100vh-6rem)] max-w-6xl items-center justify-center">
         <div className="grid w-full overflow-hidden rounded-[2rem] border border-white/15 bg-white/95 shadow-[0_30px_100px_rgba(15,23,42,0.55)] lg:grid-cols-[1.05fr_0.95fr]">
           <div className="hidden bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-10 text-white lg:block">
-            <p className="text-sm font-bold uppercase tracking-[0.28em] text-cyan-100">TESDA RTC NCR</p>
+            <p className="text-sm font-bold uppercase tracking-[0.28em] text-cyan-100">TESDA RTC - NCR</p>
             <h1 className="mt-6 text-5xl font-black leading-tight">Trainer Portal</h1>
             <p className="mt-5 max-w-lg text-lg text-cyan-50/90">
               View approved teaching loads, track each training day, and keep your profile up to date.
@@ -182,7 +182,7 @@ export default function Login() {
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-900/25">
                   <User className="h-7 w-7" />
                 </div>
-                <p className="mt-5 text-xs font-bold uppercase tracking-[0.24em] text-cyan-700">TESDA RTC NCR</p>
+                <p className="mt-5 text-xs font-bold uppercase tracking-[0.24em] text-cyan-700">TESDA RTC - NCR</p>
                 <h2 className="mt-2 text-4xl font-black tracking-tight text-slate-900">Trainer Login</h2>
                 <p className="mt-2 text-sm text-slate-600">Use the account created by the admin portal.</p>
               </div>

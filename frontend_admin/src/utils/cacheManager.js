@@ -1,44 +1,61 @@
 /**
- * Browser cache manager for storing API responses in localStorage
+ * Browser cache manager for storing API responses in localStorage.
  */
 
 export class BrowserCacheManager {
   constructor(prefix = 'app_cache_v2', expirationMinutes = 30) {
     this.prefix = prefix
-    this.expirationMs = expirationMinutes * 60 * 1000
+    this.defaultExpirationMs = expirationMinutes * 60 * 1000
   }
 
-  /**
-   * Get value from browser cache
-   */
+  normalizeExpirationMs(ttl) {
+    if (typeof ttl !== 'number' || Number.isNaN(ttl) || ttl <= 0) {
+      return this.defaultExpirationMs
+    }
+
+    if (ttl >= 1000) {
+      return ttl
+    }
+
+    return ttl * 1000
+  }
+
+  parseItem(rawValue) {
+    const parsed = JSON.parse(rawValue)
+    const timestamp = Number(parsed?.timestamp || 0)
+    const expiresAt = Number(parsed?.expiresAt || (timestamp + this.defaultExpirationMs))
+
+    return {
+      data: parsed?.data,
+      expiresAt,
+    }
+  }
+
   get(key) {
     try {
       const item = localStorage.getItem(this.getCacheKey(key))
       if (!item) return null
 
-      const { data, timestamp } = JSON.parse(item)
-      
-      // Check if cache has expired
-      if (Date.now() - timestamp > this.expirationMs) {
+      const parsed = this.parseItem(item)
+      if (Date.now() >= parsed.expiresAt) {
         localStorage.removeItem(this.getCacheKey(key))
         return null
       }
 
-      return data
+      return parsed.data
     } catch (error) {
       console.error('Error retrieving from browser cache:', error)
       return null
     }
   }
 
-  /**
-   * Set value in browser cache
-   */
-  set(key, data) {
+  set(key, data, ttl) {
     try {
+      const timestamp = Date.now()
       const cacheItem = {
         data,
-        timestamp: Date.now()
+        timestamp,
+        expiresAt: timestamp + this.normalizeExpirationMs(ttl),
       }
       localStorage.setItem(this.getCacheKey(key), JSON.stringify(cacheItem))
       return true
@@ -48,9 +65,6 @@ export class BrowserCacheManager {
     }
   }
 
-  /**
-   * Delete key from browser cache
-   */
   delete(key) {
     try {
       localStorage.removeItem(this.getCacheKey(key))
@@ -61,22 +75,19 @@ export class BrowserCacheManager {
     }
   }
 
-  /**
-   * Clear all cache entries matching a pattern
-   */
   clearPattern(pattern) {
     try {
       const regex = new RegExp(pattern)
       const keysToDelete = []
-      
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (regex.test(key)) {
+
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index)
+        if (key && regex.test(key)) {
           keysToDelete.push(key)
         }
       }
 
-      keysToDelete.forEach(key => localStorage.removeItem(key))
+      keysToDelete.forEach((key) => localStorage.removeItem(key))
       return keysToDelete.length
     } catch (error) {
       console.error('Error clearing cache pattern:', error)
@@ -84,19 +95,16 @@ export class BrowserCacheManager {
     }
   }
 
-  /**
-   * Clear all cache
-   */
   clearAll() {
     try {
       const keys = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (key.startsWith(`${this.prefix}:`)) {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index)
+        if (key?.startsWith(`${this.prefix}:`)) {
           keys.push(key)
         }
       }
-      keys.forEach(key => localStorage.removeItem(key))
+      keys.forEach((key) => localStorage.removeItem(key))
       return true
     } catch (error) {
       console.error('Error clearing all cache:', error)
@@ -104,26 +112,19 @@ export class BrowserCacheManager {
     }
   }
 
-  /**
-   * Generate cache key
-   */
   getCacheKey(key) {
     return `${this.prefix}:${key}`
   }
 
-  /**
-   * Generate cache key from prefix and parameters
-   */
   generateKey(prefix, params = {}) {
     const sortedParams = Object.entries(params)
-      .filter(([, v]) => v != null)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}_${v}`)
+      .filter(([, value]) => value != null)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${key}_${value}`)
       .join('_')
-    
+
     return sortedParams ? `${prefix}:${sortedParams}` : `${prefix}:all`
   }
 }
 
-// Export singleton instance
 export const cacheManager = new BrowserCacheManager()

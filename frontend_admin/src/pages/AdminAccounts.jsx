@@ -26,6 +26,8 @@ export default function AdminAccounts() {
       username: '',
       email: '',
       full_name: '',
+      sex: '',
+      position: '',
       password: '',
       user_type: roleFilter === 'supervisor' ? 'supervisor' : 'admin',
     },
@@ -35,6 +37,8 @@ export default function AdminAccounts() {
     defaultValues: {
       email: '',
       full_name: '',
+      sex: '',
+      position: '',
       password: '',
       is_active: true,
     },
@@ -102,6 +106,8 @@ export default function AdminAccounts() {
     editForm.reset({
       email: account.email,
       full_name: account.full_name || '',
+      sex: account.sex || '',
+      position: account.position || '',
       password: '',
       is_active: account.is_active,
     })
@@ -113,6 +119,8 @@ export default function AdminAccounts() {
       const payload = {
         email: values.email,
         full_name: values.full_name,
+        sex: values.sex || null,
+        position: values.position || null,
         is_active: values.is_active,
       }
       if (values.password) payload.password = values.password
@@ -161,10 +169,10 @@ export default function AdminAccounts() {
     }
   }
 
-  const pageTitle = user?.user_type === 'supervisor' ? 'Supervisor Accounts' : 'Admin Accounts'
+  const pageTitle = user?.user_type === 'supervisor' ? 'Center Chief Accounts' : 'Admin Accounts'
   const pageDescription = user?.user_type === 'supervisor'
-    ? 'Review supervisor accounts and manage password updates.'
-    : 'Create and manage admin or supervisor accounts with email-based password recovery.'
+    ? 'Review center chief accounts and manage password updates.'
+    : 'Create and manage admin or center chief accounts with email-based password recovery.'
 
   return (
     <div className="space-y-6">
@@ -209,6 +217,10 @@ export default function AdminAccounts() {
                     <Mail className="h-4 w-4" />
                     <span>{account.email}</span>
                   </div>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                    <p><span className="font-semibold text-slate-800">Sex:</span> {account.sex || 'Not set'}</p>
+                    <p><span className="font-semibold text-slate-800">Position:</span> {account.position || 'Not set'}</p>
+                  </div>
                 </div>
               </div>
               <div className="mt-5 flex items-center justify-between">
@@ -247,6 +259,19 @@ export default function AdminAccounts() {
               <input id="create_full_name" {...createForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
             <div>
+              <label htmlFor="create_sex" className="block text-sm font-semibold text-slate-700">Sex</label>
+              <select id="create_sex" {...createForm.register('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+                <option value="">Select sex</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="create_position" className="block text-sm font-semibold text-slate-700">Position</label>
+              <input id="create_position" {...createForm.register('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
               <label htmlFor="create_username" className="block text-sm font-semibold text-slate-700">Username</label>
               <input id="create_username" {...createForm.register('username', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
@@ -262,7 +287,7 @@ export default function AdminAccounts() {
               <label htmlFor="create_role" className="block text-sm font-semibold text-slate-700">Account Role</label>
               <select id="create_role" {...createForm.register('user_type')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
                 <option value="admin">Admin</option>
-                <option value="supervisor">Supervisor</option>
+                <option value="supervisor">Center Chief</option>
               </select>
             </div>
             <div className="flex justify-end gap-3">
@@ -279,6 +304,19 @@ export default function AdminAccounts() {
             <div>
               <label htmlFor="edit_full_name" className="block text-sm font-semibold text-slate-700">Full Name</label>
               <input id="edit_full_name" {...editForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label htmlFor="edit_sex" className="block text-sm font-semibold text-slate-700">Sex</label>
+              <select id="edit_sex" {...editForm.register('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+                <option value="">Select sex</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="edit_position" className="block text-sm font-semibold text-slate-700">Position</label>
+              <input id="edit_position" {...editForm.register('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
             <div>
               <label htmlFor="edit_email" className="block text-sm font-semibold text-slate-700">Email</label>

@@ -4,8 +4,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user, get_password_hash
+from ..cache_manager import cache_manager
 from ..schemas import AccountCreate, AccountUpdate, NotificationCreate, NotificationResponse
 from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..schedule_utils import build_assignment_summary, is_expired_date, load_schedule_rows, load_users_map
 from ..user_cleanup import delete_user_auth_artifacts, delete_user_messages, reassign_management_history
 
 router = APIRouter()
@@ -42,6 +44,17 @@ def ensure_admin(current_user: dict):
 def ensure_management_role(current_user: dict):
     if current_user.get("user_type") not in {"admin", "supervisor"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+
+def _build_history_rows(records: list[dict], kind: str) -> list[dict]:
+    rows = []
+    for record in records:
+        rows.append({"kind": kind, **record})
+    return rows
+
+
+def get_teaching_loads_summary_cache_key() -> str:
+    return cache_manager.get_cache_key("teaching_loads_summary", scope="approved")
 
 
 @router.get("/dashboard/stats")
@@ -87,15 +100,12 @@ async def get_statistics_overview(current_user: CurrentUser):
         programs = select_rows("programs", filters={"is_active": FILTER_TRUE}, select="id,type,hours,validity")
         assignments = select_rows("trainer_programs", select="id,approval_status,hours_per_day")
         trainers = select_rows("trainers", filters={"is_active": FILTER_TRUE}, select="id,trainer_type")
+        program_types = select_rows("program_types", filters={"is_active": FILTER_TRUE}, select="name")
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
     return {
-        "program_types": {
-            "institution_based": sum(1 for program in programs if program.get("type") == "Institution-Based"),
-            "community_based": sum(1 for program in programs if program.get("type") == "Community-Based"),
-            "microcredential": sum(1 for program in programs if program.get("type") == "Microcredential"),
-        },
+        "program_types": {program_type.get("name"): sum(1 for program in programs if program.get("type") == program_type.get("name")) for program_type in program_types},
         "teaching_loads": {
             "for_approval": sum(1 for row in assignments if row.get("approval_status") == "for approval"),
             "approved": sum(1 for row in assignments if row.get("approval_status") == "approved"),
@@ -315,6 +325,8 @@ async def create_account(payload: AccountCreate, current_user: CurrentUser):
                 "username": payload.username,
                 "email": payload.email,
                 "full_name": payload.full_name,
+                "sex": payload.sex,
+                "position": payload.position,
                 "password_hash": get_password_hash(payload.password),
                 "user_type": payload.user_type.value,
                 "is_active": True,
@@ -375,8 +387,8 @@ async def export_trainers(current_user: CurrentUser):
                 "ID": trainer.get("id"),
                 "Username": trainer.get("username"),
                 "Name": trainer.get("trainer_name"),
-                "TM Number": trainer.get("tm_number") or "",
-                "TM Expiration": format_date(trainer.get("tm_expiration")),
+                "TMC Level I Number": trainer.get("tm_number") or "",
+                "TMC Level I Expiration": format_date(trainer.get("tm_expiration")),
                 "NTTC Number": trainer.get("nttc_number") or "",
                 "NTTC Expiration": format_date(trainer.get("nttc_expiration")),
                 "Created": format_date(trainer.get("created_at")),
@@ -495,6 +507,81 @@ async def get_trainers(
         raise_supabase_http(exc)
 
 
+@router.get("/teaching-loads/summary")
+async def get_teaching_loads_summary(current_user: CurrentUser):
+    ensure_management_role(current_user)
+
+    try:
+        cache_key = get_teaching_loads_summary_cache_key()
+        cached = cache_manager.get(cache_key)
+        if cached is not None:
+            return cached
+
+        teaching_loads = select_rows(
+            "trainer_programs",
+            filters={"approval_status": "eq.approved"},
+            order="created_at.desc",
+            select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,assigned_by,approved_by,approved_at,created_at,schedule_date",
+        )
+
+        program_ids = {load["program_id"] for load in teaching_loads if load.get("program_id") is not None}
+        trainer_ids = {load["trainer_id"] for load in teaching_loads if load.get("trainer_id") is not None}
+        user_ids = (
+            {load.get("assigned_by") for load in teaching_loads if load.get("assigned_by") is not None}
+            | {load.get("approved_by") for load in teaching_loads if load.get("approved_by") is not None}
+        )
+
+        programs_map = {}
+        trainers_map = {}
+        users_map = load_users_map(user_ids)
+
+        if program_ids:
+            programs = select_rows(
+                "programs",
+                filters={"id": f"in.({','.join(map(str, sorted(program_ids)))})"},
+                select="id,name,type,hours,schedule,validity,is_active",
+            )
+            programs_map = {program["id"]: program for program in programs}
+
+        if trainer_ids:
+            trainers = select_rows(
+                "trainers",
+                filters={"id": f"in.({','.join(map(str, sorted(trainer_ids)))})"},
+                select="id,trainer_name,username",
+            )
+            trainers_map = {trainer["id"]: trainer for trainer in trainers}
+
+        enriched_loads = []
+        for load in teaching_loads:
+            program = programs_map.get(load["program_id"])
+            trainer = trainers_map.get(load["trainer_id"])
+            if not program or not trainer:
+                continue
+
+            assigned_user = users_map.get(load.get("assigned_by"))
+            approved_user = users_map.get(load.get("approved_by"))
+            schedule_rows = load_schedule_rows(int(load["trainer_id"]), int(load["program_id"]))
+            enriched_load = build_assignment_summary(trainer, load, program, schedule_rows, users_map)
+            enriched_load.update(
+                {
+                    "program_name": program.get("name", "Unknown Program"),
+                    "program_type": program.get("type", ""),
+                    "trainer_name": trainer.get("trainer_name", "Unknown Trainer"),
+                    "trainer_username": trainer.get("username", ""),
+                    "assigned_by_name": (assigned_user or {}).get("full_name") or (assigned_user or {}).get("username"),
+                    "assigned_by_position": (assigned_user or {}).get("position"),
+                    "approved_by_name": (approved_user or {}).get("full_name") or (approved_user or {}).get("username"),
+                    "approved_by_position": (approved_user or {}).get("position"),
+                }
+            )
+            enriched_loads.append(enriched_load)
+
+        cache_manager.set(cache_key, enriched_loads, 60000)
+        return enriched_loads
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
 @router.get("/programs/{program_id}/teaching-loads")
 async def get_program_teaching_loads(program_id: int, current_user: CurrentUser):
     ensure_management_role(current_user)
@@ -508,18 +595,20 @@ async def get_program_teaching_loads(program_id: int, current_user: CurrentUser)
                 "approval_status": "eq.approved"
             },
             order="created_at.desc",
-            select="id,trainer_id,program_id,hours_per_day,approval_status,created_at"
+            select="id,trainer_id,program_id,hours_per_day,approval_status,assigned_by,approved_by,approved_at,created_at"
         )
         
         # Batch fetch programs and trainers instead of N+1 queries
         program_ids = {load['program_id'] for load in teaching_loads}
         trainer_ids = {load['trainer_id'] for load in teaching_loads}
+        user_ids = {load.get('assigned_by') for load in teaching_loads if load.get('assigned_by')} | {load.get('approved_by') for load in teaching_loads if load.get('approved_by')}
         
         programs_map = {}
         trainers_map = {}
+        users_map = load_users_map(user_ids)
         
         if program_ids:
-            programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type")
+            programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type,hours,schedule,validity")
             programs_map = {p['id']: p for p in programs}
         
         if trainer_ids:
@@ -531,19 +620,125 @@ async def get_program_teaching_loads(program_id: int, current_user: CurrentUser)
         for load in teaching_loads:
             program = programs_map.get(load['program_id'], {})
             trainer = trainers_map.get(load['trainer_id'], {})
-            
-            enriched_load = {
-                **load,
+            assigned_user = users_map.get(load.get('assigned_by'))
+            approved_user = users_map.get(load.get('approved_by'))
+            schedule_rows = load_schedule_rows(int(load["trainer_id"]), int(load["program_id"])) if program else []
+
+            enriched_load = build_assignment_summary(trainer, load, program, schedule_rows, users_map)
+            enriched_load.update({
                 "program_name": program.get("name", "Unknown Program"),
                 "program_type": program.get("type", ""),
                 "trainer_name": trainer.get("trainer_name", "Unknown Trainer"),
-                "trainer_username": trainer.get("username", "")
-            }
+                "trainer_username": trainer.get("username", ""),
+                "assigned_by_name": (assigned_user or {}).get("full_name") or (assigned_user or {}).get("username"),
+                "assigned_by_position": (assigned_user or {}).get("position"),
+                "approved_by_name": (approved_user or {}).get("full_name") or (approved_user or {}).get("username"),
+                "approved_by_position": (approved_user or {}).get("position"),
+            })
             enriched_loads.append(enriched_load)
         
         return enriched_loads
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
+
+
+@router.get("/history")
+async def get_history(current_user: CurrentUser):
+    ensure_management_role(current_user)
+
+    try:
+        programs = select_rows(
+            "programs",
+            select="id,name,type,validity,hours,created_by,created_at",
+            order="validity.asc",
+        )
+        trainers = select_rows(
+            "trainers",
+            select="id,user_id,username,trainer_name,tm_number,tm_expiration,nttc_number,nttc_expiration,created_at",
+            order="trainer_name.asc,username.asc",
+        )
+        qualifications = select_rows(
+            "trainer_qualifications",
+            select="id,trainer_id,program_id,nttc_number,nttc_expiration,created_at",
+            order="created_at.desc",
+        )
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+    program_user_map = load_users_map({program.get("created_by") for program in programs if program.get("created_by")})
+    trainer_user_map = load_users_map({trainer.get("user_id") for trainer in trainers if trainer.get("user_id")})
+    trainer_ids = {qualification.get("trainer_id") for qualification in qualifications if qualification.get("trainer_id")}
+    qualification_trainer_map = {trainer["id"]: trainer for trainer in trainers if trainer.get("id") in trainer_ids}
+    qualification_program_map = {program["id"]: program for program in programs}
+
+    expired_programs = []
+    for program in programs:
+        if is_expired_date(program.get("validity")):
+            creator = program_user_map.get(program.get("created_by"))
+            expired_programs.append(
+                {
+                    **program,
+                    "created_by_name": (creator or {}).get("full_name") or (creator or {}).get("username"),
+                    "created_by_position": (creator or {}).get("position"),
+                }
+            )
+
+    expired_tmc_records = []
+    expired_qualification_records = []
+    for trainer in trainers:
+        user = trainer_user_map.get(trainer.get("user_id"))
+        if is_expired_date(trainer.get("tm_expiration")):
+            expired_tmc_records.append(
+                {
+                    **trainer,
+                    "record_type": "TMC",
+                    "owner_name": (user or {}).get("full_name") or (user or {}).get("username") or trainer.get("trainer_name") or trainer.get("username"),
+                    "owner_position": (user or {}).get("position"),
+                }
+            )
+        if is_expired_date(trainer.get("nttc_expiration")):
+            expired_qualification_records.append(
+                {
+                    **trainer,
+                    "record_type": "trainer_nttc",
+                    "trainer_display_name": (user or {}).get("full_name") or (user or {}).get("username") or trainer.get("trainer_name") or trainer.get("username"),
+                    "trainer_position": (user or {}).get("position"),
+                    "program_name": None,
+                    "program_type": None,
+                    "nttc_number": trainer.get("nttc_number"),
+                    "nttc_expiration": trainer.get("nttc_expiration"),
+                    "owner_name": (user or {}).get("full_name") or (user or {}).get("username") or trainer.get("trainer_name") or trainer.get("username"),
+                    "owner_position": (user or {}).get("position"),
+                }
+            )
+
+    for qualification in qualifications:
+        trainer = qualification_trainer_map.get(qualification.get("trainer_id"), {})
+        program = qualification_program_map.get(qualification.get("program_id"), {})
+        if is_expired_date(qualification.get("nttc_expiration")) or is_expired_date(program.get("validity")):
+            trainer_user = trainer_user_map.get(trainer.get("user_id"))
+            expired_qualification_records.append(
+                {
+                    **qualification,
+                    "record_type": "qualification",
+                    "trainer_name": trainer.get("trainer_name") or trainer.get("username"),
+                    "trainer_position": (trainer_user or {}).get("position"),
+                    "program_name": program.get("name"),
+                    "program_type": program.get("type"),
+                    "trainer_display_name": (trainer_user or {}).get("full_name") or (trainer_user or {}).get("username") or trainer.get("trainer_name") or trainer.get("username"),
+                }
+            )
+
+    return {
+        "expired_programs": _build_history_rows(expired_programs, "program"),
+        "expired_tmc_records": _build_history_rows(expired_tmc_records, "trainer_tm"),
+        "expired_qualifications": _build_history_rows(expired_qualification_records, "qualification"),
+        "summary": {
+            "expired_programs": len(expired_programs),
+            "expired_tmc_records": len(expired_tmc_records),
+            "expired_qualifications": len(expired_qualification_records),
+        },
+    }
 
 
 # Messaging System Endpoints

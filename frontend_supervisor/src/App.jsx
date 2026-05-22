@@ -6,7 +6,9 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Schedules from './pages/Schedules'
 import TeachingLoads from './pages/TeachingLoads'
+import GenerateReport from './pages/GenerateReport'
 import Statistics from './pages/Statistics'
+import History from './pages/History'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth()
@@ -35,7 +37,7 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/schedules" replace /> : <Login />} />
 
       <Route
         path="/"
@@ -45,13 +47,15 @@ function App() {
           </ProtectedRoute>
         )}
       >
-        <Route index element={<Navigate to="/teaching-loads" replace />} />
+        <Route index element={<Navigate to="/schedules" replace />} />
         <Route path="teaching-loads" element={<TeachingLoads />} />
+        <Route path="generate-report" element={<GenerateReport />} />
         <Route path="schedules" element={<Schedules />} />
         <Route path="statistics" element={<Statistics />} />
+        <Route path="history" element={<History />} />
       </Route>
 
-      <Route path="*" element={<Navigate to={isAuthenticated ? '/teaching-loads' : '/login'} replace />} />
+      <Route path="*" element={<Navigate to={isAuthenticated ? '/schedules' : '/login'} replace />} />
     </Routes>
   )
 }

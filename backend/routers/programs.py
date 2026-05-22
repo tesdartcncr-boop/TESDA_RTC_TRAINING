@@ -1,11 +1,13 @@
+from collections import Counter
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user
 from ..cache_manager import cache_manager
-from ..schemas import ProgramCreate, ProgramResponse, ProgramUpdate
-from ..supabase_rest import SupabaseAPIError, count_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..schemas import ProgramCreate, ProgramResponse, ProgramTypeCreate, ProgramTypeResponse, ProgramUpdate
+from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..socket_manager import broadcast_program_update, broadcast_schedule_update
 
 router = APIRouter()
 
@@ -16,7 +18,12 @@ SCHEDULES_CACHE_PATTERN = "schedules:*"
 DEFAULT_SCHEDULE_LABEL = "8 Hours/Day"
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 FILTER_TRUE = "eq.true"
-ORDER_DESC = "created_at.desc"
+ORDER_NAME_ASC = "name.asc"
+DEFAULT_PROGRAM_TYPES = [
+    "Institution-Based",
+    "Community-Based",
+    "Microcredential",
+]
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -38,6 +45,32 @@ def normalize_program_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     payload["schedule"] = schedule
     return payload
+
+
+def load_active_program_types() -> list[dict[str, Any]]:
+    try:
+        program_types = select_rows(
+            "program_types",
+            filters={"is_active": FILTER_TRUE},
+            order="name.asc",
+            select="id,name,is_active,created_at",
+        )
+    except SupabaseAPIError:
+        program_types = []
+
+    if program_types:
+        return program_types
+
+    return [
+        {"id": index + 1, "name": name, "is_active": True, "created_at": None}
+        for index, name in enumerate(DEFAULT_PROGRAM_TYPES)
+    ]
+
+
+def validate_program_type(program_type: str):
+    active_types = {item["name"] for item in load_active_program_types()}
+    if program_type not in active_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid program type")
 
 
 @router.get("/")
@@ -62,7 +95,7 @@ async def get_programs(
         
         # Apply search filter at database level
         if search:
-            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity.ilike.%{search}%,type.ilike.%{search}%,recognition_number.ilike.%{search}%)"
+            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity::text.ilike.%{search}%,type.ilike.%{search}%,recognition_number.ilike.%{search}%)"
 
         total = count_rows("programs", filters=filters)
         
@@ -70,7 +103,7 @@ async def get_programs(
         programs = select_rows(
             "programs",
             filters=filters,
-            order=ORDER_DESC,
+            order=ORDER_NAME_ASC,
             limit=limit,
             offset=skip,
             select="id,name,description,type,validity,hours,schedule,days,is_active,recognition_number,created_at"
@@ -100,11 +133,13 @@ async def create_program(program_data: ProgramCreate, current_user: CurrentUser)
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
 
+    validate_program_type(program_data.type)
+
     payload = normalize_program_payload(
         {
             "name": program_data.name,
             "description": program_data.description,
-            "type": program_data.type.value,
+            "type": program_data.type,
             "validity": program_data.validity,
             "hours": program_data.hours,
             "schedule": program_data.schedule,
@@ -119,12 +154,20 @@ async def create_program(program_data: ProgramCreate, current_user: CurrentUser)
         result = insert_row("programs", payload)
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
+        cache_manager.clear_pattern("teaching_loads_summary:*")
+        await broadcast_program_update(
+            {
+                "event_type": "program_created",
+                "program_id": result.get("id"),
+                "data": result,
+            }
+        )
         return result
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
 
-@router.get("/{program_id}", response_model=ProgramResponse)
+@router.get("/{program_id:int}", response_model=ProgramResponse)
 async def get_program(program_id: int, current_user: CurrentUser):
     try:
         program = select_one("programs", filters={"id": f"eq.{program_id}"})
@@ -136,7 +179,7 @@ async def get_program(program_id: int, current_user: CurrentUser):
     return program
 
 
-@router.put("/{program_id}", response_model=ProgramResponse)
+@router.put("/{program_id:int}", response_model=ProgramResponse)
 async def update_program(program_id: int, program_data: ProgramUpdate, current_user: CurrentUser):
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
@@ -151,7 +194,7 @@ async def update_program(program_id: int, program_data: ProgramUpdate, current_u
 
     update_data = program_data.dict(exclude_unset=True)
     if "type" in update_data and update_data["type"] is not None:
-        update_data["type"] = update_data["type"].value
+        validate_program_type(update_data["type"])
 
     update_data = normalize_program_payload({**program, **update_data})
     for internal_field in ("id", "created_at", "created_by", "updated_at", "is_active"):
@@ -164,12 +207,20 @@ async def update_program(program_id: int, program_data: ProgramUpdate, current_u
         updated_program = update_row("programs", update_data, filters={"id": f"eq.{program_id}"})
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
+        cache_manager.clear_pattern("teaching_loads_summary:*")
+        await broadcast_program_update(
+            {
+                "event_type": "program_updated",
+                "program_id": program_id,
+                "data": updated_program or {**program, **update_data, "id": program_id},
+            }
+        )
         return updated_program or program
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
 
-@router.delete("/{program_id}")
+@router.delete("/{program_id:int}")
 async def delete_program(program_id: int, current_user: CurrentUser):
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
@@ -183,13 +234,32 @@ async def delete_program(program_id: int, current_user: CurrentUser):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=PROGRAM_NOT_FOUND)
 
     try:
-        update_row("programs", {"is_active": False}, filters={"id": f"eq.{program_id}"})
+        delete_rows("schedules", filters={"program_id": f"eq.{program_id}"}, returning="minimal")
+        delete_rows("trainer_programs", filters={"program_id": f"eq.{program_id}"}, returning="minimal")
+        delete_rows("programs", filters={"id": f"eq.{program_id}"}, returning="minimal")
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
+        cache_manager.clear_pattern("schedules_trainer_programs:*")
+        cache_manager.clear_pattern("schedules_schedule:*")
+        cache_manager.clear_pattern("trainer_programs:*")
+        cache_manager.clear_pattern("trainer_schedule:*")
+        cache_manager.clear_pattern("teaching_loads_summary:*")
+        await broadcast_program_update({
+            "event_type": "program_deleted",
+            "program_id": program_id,
+            "data": {
+                "id": program_id,
+                "name": program.get("name"),
+            },
+        })
+        await broadcast_schedule_update({
+            "event_type": "program_deleted",
+            "program_id": program_id,
+        })
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
-    return {"message": "Program deactivated successfully"}
+    return {"message": "Program deleted successfully"}
 
 
 @router.get("/stats/summary")
@@ -199,19 +269,80 @@ async def get_program_stats(current_user: CurrentUser):
 
     try:
         active_programs = select_rows("programs", filters={"is_active": FILTER_TRUE}, select="id,type,hours")
+        program_types = load_active_program_types()
         total_programs = count_rows("programs", filters={"is_active": FILTER_TRUE})
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
-    institution_programs = sum(1 for program in active_programs if program.get("type") == "Institution-Based")
-    community_programs = sum(1 for program in active_programs if program.get("type") == "Community-Based")
-    microcredential_programs = sum(1 for program in active_programs if program.get("type") == "Microcredential")
+    program_counts = Counter(program.get("type") for program in active_programs if program.get("type"))
     total_hours = sum(program.get("hours") or 0 for program in active_programs)
 
     return {
         "total_programs": total_programs,
-        "institution_programs": institution_programs,
-        "community_programs": community_programs,
-        "microcredential_programs": microcredential_programs,
+        "program_types": {item["name"]: program_counts.get(item["name"], 0) for item in program_types},
         "total_hours": total_hours,
     }
+
+
+@router.get("/types", response_model=list[ProgramTypeResponse])
+async def get_program_types(current_user: CurrentUser):
+    if current_user.get("user_type") not in {"admin", "supervisor"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    return load_active_program_types()
+
+
+@router.post("/types", response_model=ProgramTypeResponse)
+async def create_program_type(payload: ProgramTypeCreate, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Program type name is required")
+
+    try:
+        existing = select_one("program_types", filters={"name": f"eq.{name}"})
+        if existing:
+            if existing.get("is_active"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Program type already exists")
+            updated = update_row(
+                "program_types",
+                {"is_active": True},
+                filters={"id": f"eq.{existing['id']}"},
+            )
+            cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
+            cache_manager.clear_pattern("teaching_loads_summary:*")
+            return updated or existing
+
+        created = insert_row(
+            "program_types",
+            {
+                "name": name,
+                "is_active": True,
+                "created_by": current_user["id"],
+            },
+        )
+        cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
+        cache_manager.clear_pattern("teaching_loads_summary:*")
+        return created
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.delete("/types/{type_id}")
+async def deactivate_program_type(type_id: int, current_user: CurrentUser):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    try:
+        program_type = select_one("program_types", filters={"id": f"eq.{type_id}"})
+        if not program_type:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program type not found")
+
+        update_row("program_types", {"is_active": False}, filters={"id": f"eq.{type_id}"})
+        cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
+        cache_manager.clear_pattern("teaching_loads_summary:*")
+        return {"message": "Program type deactivated successfully"}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)

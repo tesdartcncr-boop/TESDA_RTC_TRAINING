@@ -8,6 +8,7 @@ DEFAULT_HOURS_PER_DAY = 8
 VALID_HOURS_PER_DAY = {4, 8}
 VALID_STATUSES = {"complete", "absent", "leave", "suspended", "incomplete"}
 NON_COMPLETE_STATUSES = {"absent", "leave", "suspended", "incomplete"}
+IN_PROGRESS_STATUS = "in progress"
 
 
 def parse_date(value: Any) -> date | None:
@@ -35,6 +36,15 @@ def parse_date(value: Any) -> date | None:
 def format_date(value: Any) -> str | None:
     parsed = parse_date(value)
     return parsed.isoformat() if parsed else None
+
+
+def is_expired_date(value: Any, *, reference_date: date | None = None) -> bool:
+    parsed = parse_date(value)
+    if not parsed:
+        return False
+
+    today = reference_date or date.today()
+    return parsed < today
 
 
 def hours_to_label(hours_per_day: int) -> str:
@@ -98,6 +108,20 @@ def get_non_complete_day_count(schedule_rows: list[dict[str, Any]]) -> int:
     return sum(1 for row in schedule_rows if row.get("status") in NON_COMPLETE_STATUSES)
 
 
+def get_schedule_progress_status(schedule_rows: list[dict[str, Any]]) -> str:
+    if not schedule_rows:
+        return IN_PROGRESS_STATUS
+
+    marked_days = sum(1 for row in schedule_rows if row.get("status"))
+    return "completed" if marked_days == len(schedule_rows) else IN_PROGRESS_STATUS
+
+
+def get_schedule_progress_counts(schedule_rows: list[dict[str, Any]]) -> tuple[int, int]:
+    total_days = len(schedule_rows)
+    marked_days = sum(1 for row in schedule_rows if row.get("status"))
+    return marked_days, total_days
+
+
 def get_last_used_day(schedule_rows: list[dict[str, Any]]) -> int:
     used_days = [
         int(row.get("day_number") or 0)
@@ -117,6 +141,19 @@ def load_schedule_rows(trainer_id: int, program_id: int) -> list[dict[str, Any]]
         },
         order="day_number",
     )
+
+
+def load_users_map(user_ids: list[int] | set[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
+    normalized_ids = sorted({int(user_id) for user_id in user_ids if user_id is not None})
+    if not normalized_ids:
+        return {}
+
+    users = select_rows(
+        "users",
+        filters={"id": f"in.({','.join(map(str, normalized_ids))})"},
+        select="id,username,full_name,position",
+    )
+    return {int(user["id"]): user for user in users if user.get("id") is not None}
 
 
 def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]) -> list[dict[str, Any]]:
@@ -197,15 +234,28 @@ def build_assignment_summary(
     assignment: dict[str, Any],
     program: dict[str, Any],
     schedule_rows: list[dict[str, Any]] | None = None,
+    users_map: dict[int, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rows = schedule_rows if schedule_rows is not None else load_schedule_rows(
         int(assignment["trainer_id"]),
         int(assignment["program_id"]),
     )
+    if users_map is None:
+        users_map = load_users_map(
+            [assignment.get("assigned_by"), assignment.get("approved_by")]
+        )
+
+    assigned_user = users_map.get(int(assignment["assigned_by"])) if assignment.get("assigned_by") else None
+    approved_user = users_map.get(int(assignment["approved_by"])) if assignment.get("approved_by") else None
     hours_per_day = get_assignment_hours_per_day(assignment, program)
     base_days = calculate_base_days(program, hours_per_day)
     total_days = max(base_days + get_non_complete_day_count(rows), get_last_used_day(rows), base_days)
     total_hours = get_program_total_hours(program)
+    marked_days, schedule_total_days = get_schedule_progress_counts(rows)
+    approval_status = assignment.get("approval_status") or "for approval"
+    progress_status = IN_PROGRESS_STATUS
+    if approval_status == "approved" and total_days > 0 and marked_days >= total_days:
+        progress_status = "completed"
 
     return {
         "id": assignment["id"],
@@ -221,12 +271,20 @@ def build_assignment_summary(
         "extension_days": max(total_days - base_days, 0),
         "program_schedule": hours_to_label(hours_per_day),
         "hours_per_day": hours_per_day,
-        "approval_status": assignment.get("approval_status") or "for approval",
+        "approval_status": approval_status,
+        "progress_status": progress_status,
+        "schedule_marked_days": marked_days,
+        "schedule_total_days": schedule_total_days,
         "approval_notes": assignment.get("approval_notes"),
         "schedule_date": assignment.get("schedule_date"),
         "approved_by": assignment.get("approved_by"),
+        "approved_by_name": (approved_user or {}).get("full_name") or (approved_user or {}).get("username"),
+        "approved_by_position": (approved_user or {}).get("position"),
         "approved_at": assignment.get("approved_at"),
         "nttc_number": assignment.get("nttc_number"),
+        "assigned_by": assignment.get("assigned_by"),
+        "assigned_by_name": (assigned_user or {}).get("full_name") or (assigned_user or {}).get("username"),
+        "assigned_by_position": (assigned_user or {}).get("position"),
         "created_at": assignment.get("created_at"),
     }
 

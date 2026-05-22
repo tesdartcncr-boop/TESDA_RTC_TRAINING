@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Enum
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Enum, Date
 from sqlalchemy.sql import func
 from database import Base
 import enum
@@ -21,6 +21,8 @@ class User(Base):
     email = Column(String(100), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(150))
+    sex = Column(String(20))
+    position = Column(String(150))
     user_type = Column(Enum(UserType), nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -54,13 +56,13 @@ class Program(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text)
-    type = Column(Enum(ProgramType), nullable=False)
-    validity = Column(String(100))
+    type = Column(String(100), nullable=False)
+    validity = Column(Date)
     hours = Column(Integer, nullable=False)
     schedule = Column(String(20), default="8 Hours/Day")
     days = Column(Integer)
     is_active = Column(Boolean, default=True)
-    created_by = Column(Integer, nullable=False)  # Admin user ID
+    created_by = Column(Integer)  # Admin user ID
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -89,6 +91,7 @@ class TrainerQualification(Base):
     trainer_id = Column(Integer, nullable=False, index=True)
     program_id = Column(Integer, nullable=False, index=True)
     nttc_number = Column(String(50))
+    nttc_expiration = Column(Date)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

@@ -4,14 +4,17 @@ import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Mail, Pencil, Plus, Search, Trash2, User } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 
 const inputClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const formatDateOnly = (value) => (value ? String(value).split('T')[0] : '')
 
 const emptyTrainerValues = {
   username: '',
@@ -45,7 +48,7 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
       setSelectedQualifications((current) => current.filter((qualification) => qualification.program_id !== program.id))
       return
     }
-    setSelectedQualifications((current) => [...current, { program_id: program.id, nttc_number: '' }])
+    setSelectedQualifications((current) => [...current, { program_id: program.id, nttc_number: '', nttc_expiration: '' }])
   }
 
   const updateNttcNumber = (programId, value) => {
@@ -56,11 +59,19 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
     )))
   }
 
+  const updateNttcExpiration = (programId, value) => {
+    setSelectedQualifications((current) => current.map((qualification) => (
+      qualification.program_id === programId
+        ? { ...qualification, nttc_expiration: value }
+        : qualification
+    )))
+  }
+
   return (
     <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-5">
       <div>
         <h4 className="text-lg font-bold text-slate-900">Qualifications</h4>
-        <p className="text-sm text-slate-600">Choose from created program names and add the matching NTTC number.</p>
+        <p className="text-sm text-slate-600">Choose from created program names and add the matching NTTC number and expiration date.</p>
       </div>
       <input
         type="text"
@@ -80,14 +91,28 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
                 <span className="font-medium text-slate-800">{program.name}</span>
               </label>
               {selected && (
-                <input
-                  type="text"
-                  id={`nttc_number_${program.id}`}
-                  value={selected.nttc_number || ''}
-                  onChange={(event) => updateNttcNumber(program.id, event.target.value)}
-                  placeholder="NTTC number"
-                  className={`${inputClassName} mt-3 text-sm`}
-                />
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="text"
+                    id={`nttc_number_${program.id}`}
+                    value={selected.nttc_number || ''}
+                    onChange={(event) => updateNttcNumber(program.id, event.target.value)}
+                    placeholder="NTTC number"
+                    className={`${inputClassName} text-sm`}
+                  />
+                  <div>
+                    <label htmlFor={`nttc_expiration_${program.id}`} className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      Expiration Date
+                    </label>
+                    <input
+                      type="date"
+                      id={`nttc_expiration_${program.id}`}
+                      value={formatDateOnly(selected.nttc_expiration)}
+                      onChange={(event) => updateNttcExpiration(program.id, event.target.value)}
+                      className={inputClassName}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )
@@ -150,11 +175,11 @@ function TrainerFormFields({ form, isEdit }) {
         </select>
       </div>
       <div>
-        <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TM Number</label>
-        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TM123456" className={fieldClass} />
+        <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TMC Level I Number</label>
+        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TMC123456" className={fieldClass} />
       </div>
       <div>
-        <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TM Expiration</label>
+        <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TMC Level I Expiration</label>
         <input id={`${mode}_tm_expiration`} type="date" {...form.register('tm_expiration')} className={fieldClass} />
       </div>
     </div>
@@ -175,6 +200,7 @@ TrainerFormFields.defaultProps = {
 export default function Trainers() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [trainers, setTrainers] = useState([])
   const [programs, setPrograms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -193,7 +219,7 @@ export default function Trainers() {
     cacheManager.clearPattern('stats_')
   }
 
-  const loadTrainers = async () => {
+  const loadTrainers = useCallback(async () => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('trainers_list', { search: searchTerm || null })
@@ -217,9 +243,9 @@ export default function Trainers() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [searchTerm])
 
-  const loadPrograms = async () => {
+  const loadPrograms = useCallback(async () => {
     try {
       const cacheKey = cacheManager.generateKey('programs_list', { search: null })
       const cached = cacheManager.get(cacheKey)
@@ -239,7 +265,7 @@ export default function Trainers() {
       console.error(error)
       toast.error('Failed to load programs')
     }
-  }
+  }, [])
 
   const loadQualifications = async (trainerId) => {
     const cacheKey = cacheManager.generateKey('trainer_qualifications', { trainer_id: trainerId })
@@ -255,6 +281,7 @@ export default function Trainers() {
     const qualifications = (data.data || []).map((qualification) => ({
       program_id: qualification.program_id,
       nttc_number: qualification.nttc_number || '',
+      nttc_expiration: qualification.nttc_expiration ? formatDateOnly(qualification.nttc_expiration) : '',
     }))
     cacheManager.set(cacheKey, qualifications)
     return qualifications
@@ -262,11 +289,39 @@ export default function Trainers() {
 
   useEffect(() => {
     loadTrainers()
-  }, [searchTerm])
+  }, [loadTrainers])
 
   useEffect(() => {
     loadPrograms()
-  }, [])
+  }, [loadPrograms])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    const socket = getSocket()
+    if (!socket) return undefined
+
+    registerUser(user.user_id || user.id)
+
+    const handleTrainerUpdate = () => {
+      invalidateTrainerCaches()
+      loadTrainers()
+    }
+
+    const handleProgramUpdate = () => {
+      cacheManager.clearPattern('programs_list:')
+      cacheManager.clearPattern('trainer_qualifications:')
+      loadPrograms()
+    }
+
+    socket.on('trainer_update', handleTrainerUpdate)
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('trainer_update', handleTrainerUpdate)
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadPrograms, loadTrainers, user?.id, user?.user_id])
 
   useEffect(() => {
     if (location.state?.openCreateModal) {
@@ -324,7 +379,12 @@ export default function Trainers() {
     const toAddOrUpdate = desiredQualifications
     const toRemove = currentIds.filter((programId) => !desiredIds.has(programId))
 
-    for (const qualification of toAddOrUpdate) {
+    const changedQualifications = toAddOrUpdate.filter((qualification) => {
+      const current = currentQualifications.find((item) => item.program_id === qualification.program_id)
+      return !current || current.nttc_number !== qualification.nttc_number || current.nttc_expiration !== qualification.nttc_expiration
+    })
+
+    for (const qualification of changedQualifications) {
       await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
         method: 'POST',
         headers: {
@@ -509,8 +569,8 @@ export default function Trainers() {
               </div>
               <div className="mt-5 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
                 <p><span className="font-semibold text-slate-800">Type:</span> {trainer.trainer_type || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">TM Number:</span> {trainer.tm_number || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">TM Expiration:</span> {trainer.tm_expiration ? trainer.tm_expiration.split('T')[0] : 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">TMC Level I Number:</span> {trainer.tm_number || 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">TMC Level I Expiration:</span> {trainer.tm_expiration ? trainer.tm_expiration.split('T')[0] : 'Not set'}</p>
                 <p><span className="font-semibold text-slate-800">Created:</span> {trainer.created_at?.split('T')[0]}</p>
               </div>
               <div className="mt-6 flex gap-3">
@@ -565,6 +625,7 @@ QualificationSelector.propTypes = {
   selectedQualifications: PropTypes.arrayOf(PropTypes.shape({
     program_id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
     nttc_number: PropTypes.string,
+    nttc_expiration: PropTypes.string,
   })).isRequired,
   setSelectedQualifications: PropTypes.func.isRequired,
 }

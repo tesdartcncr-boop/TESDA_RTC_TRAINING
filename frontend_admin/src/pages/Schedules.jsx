@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const STATUS_COLORS = {
@@ -18,13 +19,31 @@ const STATUS_COLORS = {
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
   { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
-  { key: 'leave', label: 'Leave', color: 'bg-sky-500' },
+  { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
   { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
   { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
 ]
 
+const getProgressBadge = (assignment) => {
+  const completed = assignment?.progress_status === 'completed'
+  return {
+    label: completed ? 'Completed' : 'In Progress',
+    tone: completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+  }
+}
+
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const formatDateOnly = (value) => (value ? String(value).split('T')[0] : 'Not set')
+
+const isDateExpired = (value) => {
+  if (!value) return false
+  const dateOnly = String(value).split('T')[0]
+  const expiryDate = new Date(`${dateOnly}T00:00:00`)
+  if (Number.isNaN(expiryDate.getTime())) return false
+  expiryDate.setHours(23, 59, 59, 999)
+  return expiryDate.getTime() < Date.now()
+}
 
 export default function Schedules() {
   const location = useLocation()
@@ -37,6 +56,7 @@ export default function Schedules() {
   const [eligiblePrograms, setEligiblePrograms] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expiredTrainer, setExpiredTrainer] = useState(null)
+  const [assignmentWarning, setAssignmentWarning] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -165,7 +185,19 @@ export default function Schedules() {
       }
 
       const qualifiedProgramIds = new Set((qualifications || []).map((row) => row.program_id))
-      setEligiblePrograms((programs || []).filter((program) => qualifiedProgramIds.has(program.id)))
+      const nextPrograms = (programs || [])
+        .filter((program) => qualifiedProgramIds.has(program.id))
+        .map((program) => {
+          const qualification = (qualifications || []).find((row) => row.program_id === program.id)
+          return {
+            ...program,
+            qualification,
+            programExpired: isDateExpired(program.validity),
+            qualificationExpired: isDateExpired(qualification?.nttc_expiration),
+          }
+        })
+
+      setEligiblePrograms(nextPrograms)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load trainer qualifications')
@@ -174,15 +206,35 @@ export default function Schedules() {
 
   const isTmExpired = (tmExpiration) => {
     if (!tmExpiration) return false
-    const expiryDate = new Date(tmExpiration)
+    const dateOnly = String(tmExpiration).split('T')[0]
+    const expiryDate = new Date(`${dateOnly}T00:00:00`)
     if (Number.isNaN(expiryDate.getTime())) return false
     expiryDate.setHours(23, 59, 59, 999)
     return expiryDate.getTime() < Date.now()
   }
 
+  const getLoadOwner = (assignment) => {
+    if (assignment?.approval_status === 'for approval') {
+      return {
+        label: 'Created by',
+        name: assignment.assigned_by_name || 'Not set',
+        position: assignment.assigned_by_position || '',
+        tone: 'border-amber-200 bg-amber-50 text-amber-800',
+      }
+    }
+
+    return {
+      label: 'Reviewed by',
+      name: assignment?.approved_by_name || 'Not set',
+      position: assignment?.approved_by_position || '',
+      tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    }
+  }
+
   const handleTrainerChange = (event) => {
     const trainerId = event.target.value
     const selectedTrainer = trainers.find((trainer) => String(trainer.id) === String(trainerId))
+    setAssignmentWarning(null)
 
     if (selectedTrainer && isTmExpired(selectedTrainer.tm_expiration)) {
       setExpiredTrainer(selectedTrainer)
@@ -209,6 +261,62 @@ export default function Schedules() {
   }, [user?.user_type])
 
   useEffect(() => {
+    if (!user?.id) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    registerUser(user.user_id || user.id)
+
+    const handleScheduleUpdate = (payload) => {
+      if (!payload || !['assignment_approval_updated', 'assignment_created', 'assignment_deleted'].includes(payload.event_type)) return
+
+      cacheManager.clearPattern('approval_queue:')
+      setSelectedAssignment((current) => {
+        if (!current) return null
+        if (String(current.trainer_id) === String(payload.trainer_id) && String(current.program_id) === String(payload.program_id)) {
+          setScheduleDays([])
+          return payload.event_type === 'assignment_deleted' ? null : current
+        }
+        return current
+      })
+      loadAssignments()
+    }
+
+    socket.on('schedule_update', handleScheduleUpdate)
+
+    return () => {
+      socket.off('schedule_update', handleScheduleUpdate)
+    }
+  }, [loadAssignments, user?.id, user?.user_id])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    const handleProgramUpdate = (payload) => {
+      if (!payload?.event_type || !['program_created', 'program_updated', 'program_deleted'].includes(payload.event_type)) return
+
+      cacheManager.clearPattern('approval_queue:')
+      cacheManager.clearPattern('schedule_days:')
+      loadAssignments()
+      setSelectedAssignment((current) => {
+        if (!current || String(current.program_id) !== String(payload.program_id)) return current
+        setScheduleDays([])
+        return payload.event_type === 'program_deleted' ? null : current
+      })
+    }
+
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadAssignments, user?.id, user?.user_id])
+
+  useEffect(() => {
     if (location.state?.openCreateModal) {
       setShowCreateModal(true)
       navigate(location.pathname, { replace: true, state: {} })
@@ -216,15 +324,38 @@ export default function Schedules() {
   }, [location, navigate])
 
   const filteredAssignments = useMemo(() => {
-    if (statusFilter === 'all') return assignments
-    return assignments.filter((assignment) => assignment.approval_status === statusFilter)
+    return statusFilter === 'all' ? assignments : assignments.filter((assignment) => assignment.approval_status === statusFilter)
   }, [assignments, statusFilter])
 
   const handleCreate = async (values) => {
     const selectedTrainer = trainers.find((trainer) => String(trainer.id) === String(values.trainer_id))
+    const selectedProgram = eligiblePrograms.find((program) => String(program.id) === String(values.program_id))
     if (selectedTrainer && isTmExpired(selectedTrainer.tm_expiration)) {
       setExpiredTrainer(selectedTrainer)
       toast.error('TM is expired. This trainer cannot be assigned a teaching load.')
+      return
+    }
+
+    if (!selectedProgram) {
+      toast.error('Please choose a qualified program.')
+      return
+    }
+
+    if (selectedProgram.programExpired) {
+      setAssignmentWarning({
+        title: 'Program Validity Expired',
+        message: `${selectedProgram.name} cannot be assigned because the program validity date has expired.`,
+        detail: `Validity Date: ${formatDateOnly(selectedProgram.validity)}`,
+      })
+      return
+    }
+
+    if (selectedProgram.qualificationExpired) {
+      setAssignmentWarning({
+        title: 'NTTC Expired',
+        message: `${selectedTrainer?.trainer_name || selectedTrainer?.username || 'This trainer'} cannot be assigned to ${selectedProgram.name} because the NTTC qualification for this program has expired.`,
+        detail: `NTTC Expiration: ${formatDateOnly(selectedProgram.qualification?.nttc_expiration)}`,
+      })
       return
     }
 
@@ -251,6 +382,8 @@ export default function Schedules() {
       cacheManager.clearPattern('approval_queue:')
       cacheManager.clearPattern('schedule_days:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_dashboard_stats')
+      setAssignmentWarning(null)
       createForm.reset({
         trainer_id: '',
         program_id: '',
@@ -290,6 +423,7 @@ export default function Schedules() {
       cacheManager.clearPattern('approval_queue:')
       cacheManager.clearPattern('schedule_days:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_dashboard_stats')
       loadAssignments()
     } catch (error) {
       toast.error(error.message)
@@ -318,7 +452,12 @@ export default function Schedules() {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{assignment.approval_status}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{assignment.approval_status}</p>
+              <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${getProgressBadge(assignment).tone}`}>
+                {getProgressBadge(assignment).label}
+              </span>
+            </div>
             <h3 className="mt-2 text-lg font-bold text-slate-900">{assignment.program_name}</h3>
             <p className="mt-1 text-sm text-slate-600">{assignment.trainer_name}</p>
           </div>
@@ -330,6 +469,11 @@ export default function Schedules() {
           <p>Start Date: {assignment.schedule_date || 'Not set'}</p>
           <p>Total Hours: {assignment.program_total_hours || 0}</p>
           <p>Calendar Days: {assignment.program_days || 0}</p>
+        </div>
+        <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${getLoadOwner(assignment).tone}`}>
+          <p className="font-semibold uppercase tracking-[0.18em]">{getLoadOwner(assignment).label}</p>
+          <p className="mt-1 font-bold">{getLoadOwner(assignment).name}</p>
+          {getLoadOwner(assignment).position && <p className="text-xs">{getLoadOwner(assignment).position}</p>}
         </div>
       </button>
     ))
@@ -345,12 +489,18 @@ export default function Schedules() {
         </div>
         <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-700">
           <p><span className="font-semibold">Type:</span> {selectedAssignment.program_type}</p>
-          <p><span className="font-semibold">Validity:</span> {selectedAssignment.program_validity || 'Not set'}</p>
+          <p><span className="font-semibold">Validity Date:</span> {formatDateOnly(selectedAssignment.program_validity)}</p>
           <p><span className="font-semibold">Hours/Day:</span> {selectedAssignment.hours_per_day}</p>
         </div>
       </div>
 
-      {(user?.user_type === 'admin' || user?.user_type === 'supervisor') && selectedAssignment.approval_status !== 'approved' && (
+      <div className={`rounded-[1.75rem] border p-5 ${getLoadOwner(selectedAssignment).tone}`}>
+        <p className="text-xs font-bold uppercase tracking-[0.2em]">{getLoadOwner(selectedAssignment).label}</p>
+        <p className="mt-2 text-xl font-black">{getLoadOwner(selectedAssignment).name}</p>
+        {getLoadOwner(selectedAssignment).position && <p className="mt-1 text-sm">{getLoadOwner(selectedAssignment).position}</p>}
+      </div>
+
+      {user?.user_type === 'supervisor' && selectedAssignment.approval_status !== 'approved' && (
         <div className="flex flex-wrap gap-3">
           <button type="button" onClick={() => handleApproval('approved')} disabled={isProcessing} className="inline-flex items-center rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
             <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -454,18 +604,19 @@ export default function Schedules() {
             </button>
           ))}
         </div>
+
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.05fr_1.3fr]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.3fr)]">
         <div className="space-y-4">{assignmentsPanel}</div>
 
-        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm xl:sticky xl:top-6 xl:self-start">
           {detailsPanel}
         </div>
       </div>
 
       {showCreateModal && (
-        <ModalShell title="Create Teaching Load" onClose={() => setShowCreateModal(false)} maxWidth="max-w-5xl">
+        <ModalShell title="Create Teaching Load" onClose={() => { setShowCreateModal(false); setAssignmentWarning(null) }} maxWidth="max-w-5xl">
           <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
             <div>
               <label htmlFor="teaching_load_trainer" className="block text-sm font-semibold text-slate-700">Trainer</label>
@@ -486,7 +637,9 @@ export default function Schedules() {
               <select id="teaching_load_program" {...createForm.register('program_id', { required: true })} className={`${fieldClassName} mt-2`}>
                 <option value="">Select program</option>
                 {eligiblePrograms.map((program) => (
-                  <option key={program.id} value={program.id}>{program.name}</option>
+                  <option key={program.id} value={program.id}>
+                    {program.name}{program.programExpired ? ' (Program expired)' : ''}{!program.programExpired && program.qualificationExpired ? ' (NTTC expired)' : ''}
+                  </option>
                 ))}
               </select>
             </div>
@@ -517,18 +670,38 @@ export default function Schedules() {
       )}
 
       {expiredTrainer && (
-        <ModalShell title="TM Expired" onClose={() => setExpiredTrainer(null)} maxWidth="max-w-lg">
+        <ModalShell title="TMC Level I Expired" onClose={() => setExpiredTrainer(null)} maxWidth="max-w-lg">
           <div className="space-y-4">
             <p className="text-sm text-slate-700">
-              {expiredTrainer.trainer_name || expiredTrainer.username} cannot be assigned a teaching load because the TM is expired.
+              {expiredTrainer.trainer_name || expiredTrainer.username} cannot be assigned a teaching load because the TMC Level I is expired.
             </p>
             <p className="text-sm font-semibold text-rose-600">
-              TM Expiration: {expiredTrainer.tm_expiration ? expiredTrainer.tm_expiration.split('T')[0] : 'Not set'}
+              TMC Level I Expiration: {expiredTrainer.tm_expiration ? expiredTrainer.tm_expiration.split('T')[0] : 'Not set'}
             </p>
             <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() => setExpiredTrainer(null)}
+                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {assignmentWarning && (
+        <ModalShell title={assignmentWarning.title} onClose={() => setAssignmentWarning(null)} maxWidth="max-w-lg">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">{assignmentWarning.message}</p>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {assignmentWarning.detail}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAssignmentWarning(null)}
                 className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
               >
                 OK

@@ -197,8 +197,10 @@ export default function Messages() {
     if (!isAuthenticated || !user) return undefined
 
     const interval = setInterval(() => {
-      loadMessages()
-    }, 15000)
+      if (!document.hidden) {
+        loadMessages()
+      }
+    }, 60000)
 
     return () => clearInterval(interval)
   }, [isAuthenticated, loadMessages, user])
@@ -212,16 +214,18 @@ export default function Messages() {
 
       registerUser(user.user_id || user.id)
 
-      const handleNewMessage = () => {
+      const handleMessageEvent = () => {
         const cacheKey = cacheManager.generateKey('trainer_messages', { user_id: user.user_id || user.id })
         cacheManager.delete(cacheKey)
         loadMessages()
       }
 
-      socket.on('new_message', handleNewMessage)
+      socket.on('new_message', handleMessageEvent)
+      socket.on('message_update', handleMessageEvent)
 
       return () => {
-        socket.off('new_message', handleNewMessage)
+        socket.off('new_message', handleMessageEvent)
+        socket.off('message_update', handleMessageEvent)
       }
     } catch (socketError) {
       console.error('Failed to setup websocket:', socketError)
@@ -399,7 +403,7 @@ export default function Messages() {
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
+            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC - NCR</p>
             <h1 className="mt-4 flex items-center gap-3 text-4xl font-black">
               <Mail className="h-8 w-8" />
               Messages

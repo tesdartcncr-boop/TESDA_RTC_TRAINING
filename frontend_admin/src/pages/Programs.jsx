@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Briefcase, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const PROGRAM_TYPES = [
@@ -13,8 +14,40 @@ const PROGRAM_TYPES = [
   'Microcredential',
 ]
 
+const buildDefaultProgramTypes = () => PROGRAM_TYPES.map((name, index) => ({ id: index + 1, name }))
+
+const normalizeProgramTypes = (data) => {
+  if (!Array.isArray(data)) {
+    return []
+  }
+
+  return data
+    .map((programType, index) => {
+      if (typeof programType === 'string') {
+        return { id: index + 1, name: programType }
+      }
+
+      if (!programType || typeof programType !== 'object') {
+        return null
+      }
+
+      const { name } = programType
+      if (!name) {
+        return null
+      }
+
+      return {
+        ...programType,
+        id: programType.id ?? index + 1,
+        name,
+      }
+    })
+    .filter(Boolean)
+}
+
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const formatDateOnly = (value) => (value ? String(value).split('T')[0] : 'Not set')
 
 export default function Programs() {
   const location = useLocation()
@@ -22,6 +55,8 @@ export default function Programs() {
   const [programs, setPrograms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
+  const [programTypes, setProgramTypes] = useState([])
+  const [newProgramType, setNewProgramType] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingProgram, setEditingProgram] = useState(null)
 
@@ -37,7 +72,7 @@ export default function Programs() {
   })
   const editForm = useForm()
 
-  const loadPrograms = async () => {
+  const loadPrograms = useCallback(async () => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('programs_list', { search: searchTerm || null })
@@ -61,11 +96,52 @@ export default function Programs() {
     } finally {
       setLoading(false)
     }
+  }, [searchTerm])
+
+  const loadProgramTypes = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/programs/types`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || 'Failed to load program types')
+      }
+
+      const data = await response.json()
+      const nextTypes = normalizeProgramTypes(data)
+      setProgramTypes(nextTypes.length > 0 ? nextTypes : buildDefaultProgramTypes())
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to load program types')
+      setProgramTypes((currentTypes) => (currentTypes.length > 0 ? currentTypes : buildDefaultProgramTypes()))
+    }
   }
 
   useEffect(() => {
     loadPrograms()
-  }, [searchTerm])
+  }, [loadPrograms])
+
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return undefined
+
+    const handleProgramUpdate = () => {
+      cacheManager.clearPattern('programs_list:')
+      cacheManager.clearPattern('programs:')
+      loadPrograms()
+    }
+
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadPrograms])
+
+  useEffect(() => {
+    loadProgramTypes()
+  }, [])
 
   useEffect(() => {
     if (location.state?.openCreateModal) {
@@ -75,14 +151,62 @@ export default function Programs() {
   }, [location, navigate])
 
   const filteredPrograms = useMemo(() => {
-    if (!searchTerm.trim()) return programs
-    const query = searchTerm.toLowerCase()
-    return programs.filter((program) =>
-      [program.name, program.description, program.validity, program.type]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(query))
-    )
+    if (searchTerm.trim()) {
+      const query = searchTerm.toLowerCase()
+      return programs.filter((program) =>
+        [program.name, program.description, program.validity, program.type]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(query))
+      )
+    }
+
+    return [...programs].sort((left, right) => (left.name || '').localeCompare(right.name || ''))
   }, [programs, searchTerm])
+
+  const availableProgramTypes = programTypes.length > 0 ? programTypes : PROGRAM_TYPES.map((name, index) => ({ id: index + 1, name }))
+
+  const handleAddProgramType = async () => {
+    const name = newProgramType.trim()
+    if (!name) return
+
+    try {
+      const response = await fetch(`${API_BASE}/api/programs/types`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ name }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to create program type')
+      toast.success('Program type added successfully')
+      cacheManager.clearPattern('program_types_list:')
+      setNewProgramType('')
+      loadProgramTypes()
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const handleDeleteProgramType = async (programType) => {
+    if (!globalThis.confirm(`Remove ${programType.name}?`)) return
+
+    try {
+      const response = await fetch(`${API_BASE}/api/programs/types/${programType.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to remove program type')
+      toast.success('Program type removed successfully')
+      cacheManager.clearPattern('program_types_list:')
+      loadProgramTypes()
+      loadPrograms()
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
 
   const handleCreate = async (values) => {
     try {
@@ -111,6 +235,7 @@ export default function Programs() {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_dashboard_stats')
       createForm.reset()
       setShowCreateModal(false)
       loadPrograms()
@@ -156,6 +281,7 @@ export default function Programs() {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_dashboard_stats')
       setEditingProgram(null)
       loadPrograms()
     } catch (error) {
@@ -178,6 +304,7 @@ export default function Programs() {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_dashboard_stats')
       loadPrograms()
     } catch (error) {
       toast.error(error.message)
@@ -202,13 +329,44 @@ export default function Programs() {
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex-1">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Program Type Catalog</p>
+            <p className="mt-2 text-sm text-slate-600">Add new categories or deactivate ones you no longer want in the program dropdown.</p>
+          </div>
+          <div className="flex flex-1 gap-3 lg:justify-end">
+            <input
+              type="text"
+              value={newProgramType}
+              onChange={(event) => setNewProgramType(event.target.value)}
+              placeholder="New program type"
+              className={`${fieldClassName} max-w-md`}
+            />
+            <button type="button" onClick={handleAddProgramType} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/20">
+              Add Type
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {availableProgramTypes.map((programType) => (
+            <span key={programType.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-700">
+              {programType.name}
+              <button type="button" onClick={() => handleDeleteProgramType(programType)} className="text-rose-600 hover:text-rose-700">
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="relative">
           <Search className="pointer-events-none absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
           <input
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search program name, type, or validity..."
+            placeholder="Search program name, type, or validity date..."
             className={`${fieldClassName} pl-12`}
           />
         </div>
@@ -230,9 +388,9 @@ export default function Programs() {
                 </div>
               </div>
               <div className="mt-5 space-y-2 text-sm text-slate-600">
-                <p><span className="font-semibold text-slate-800">Recognition Number:</span> {program.recognition_number || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">Validity:</span> {program.validity || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">Hours:</span> {program.hours || 0}</p>
+                <p><span className="font-semibold text-slate-800">COPR/ Recognition Number:</span> {program.recognition_number || 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">Validity Date:</span> {formatDateOnly(program.validity)}</p>
+                <p><span className="font-semibold text-slate-800">Nominal Duration:</span> {program.hours || 0}</p>
                 <p><span className="font-semibold text-slate-800">Weekday Days:</span> {program.days || 0}</p>
                 <p>{program.description || 'No description provided.'}</p>
               </div>
@@ -265,21 +423,21 @@ export default function Programs() {
               <input id="program_name" {...createForm.register('name', { required: 'Program name is required' })} placeholder="e.g. Welding Basics" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
-              <input id="program_recognition_number" {...createForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">COPR/ Recognition Number</label>
+              <input id="program_recognition_number" {...createForm.register('recognition_number')} placeholder="Enter COPR/ recognition number" className={`${fieldClassName} mt-2`} />
             </div>
             <div>
               <label htmlFor="program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>
               <select id="program_type" {...createForm.register('type')} className={`${fieldClassName} mt-2`}>
-                {PROGRAM_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                {availableProgramTypes.map((type) => <option key={type.id} value={type.name}>{type.name}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="program_validity" className="block text-sm font-semibold text-slate-700">Validity</label>
-              <input id="program_validity" {...createForm.register('validity')} placeholder="e.g. 3 years" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="program_validity" className="block text-sm font-semibold text-slate-700">Validity Date</label>
+              <input id="program_validity" type="date" {...createForm.register('validity')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="program_hours" className="block text-sm font-semibold text-slate-700">Number of Hours</label>
+              <label htmlFor="program_hours" className="block text-sm font-semibold text-slate-700">Nominal Duration</label>
               <input id="program_hours" type="number" {...createForm.register('hours')} placeholder="e.g. 120" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
@@ -302,21 +460,21 @@ export default function Programs() {
               <input id="edit_program_name" {...editForm.register('name', { required: true })} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="edit_program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
-              <input id="edit_program_recognition_number" {...editForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="edit_program_recognition_number" className="block text-sm font-semibold text-slate-700">COPR/ Recognition Number</label>
+              <input id="edit_program_recognition_number" {...editForm.register('recognition_number')} placeholder="Enter COPR/ recognition number" className={`${fieldClassName} mt-2`} />
             </div>
             <div>
               <label htmlFor="edit_program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>
               <select id="edit_program_type" {...editForm.register('type')} className={`${fieldClassName} mt-2`}>
-                {PROGRAM_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                {availableProgramTypes.map((type) => <option key={type.id} value={type.name}>{type.name}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="edit_program_validity" className="block text-sm font-semibold text-slate-700">Validity</label>
-              <input id="edit_program_validity" {...editForm.register('validity')} className={`${fieldClassName} mt-2`} />
+              <label htmlFor="edit_program_validity" className="block text-sm font-semibold text-slate-700">Validity Date</label>
+              <input id="edit_program_validity" type="date" {...editForm.register('validity')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="edit_program_hours" className="block text-sm font-semibold text-slate-700">Number of Hours</label>
+              <label htmlFor="edit_program_hours" className="block text-sm font-semibold text-slate-700">Nominal Duration</label>
               <input id="edit_program_hours" type="number" {...editForm.register('hours')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">

@@ -11,6 +11,7 @@ import TeachingLoads from './pages/TeachingLoads'
 import Inbox from './pages/Inbox'
 import AdminAccounts from './pages/AdminAccounts'
 import Statistics from './pages/Statistics'
+import History from './pages/History'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth()
@@ -84,6 +85,7 @@ function App() {
           )}
         />
         <Route path="statistics" element={<Statistics />} />
+        <Route path="history" element={<History />} />
       </Route>
 
       <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />

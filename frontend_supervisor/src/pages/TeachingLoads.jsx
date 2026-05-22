@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react'
-import { Search, Users, CalendarDays, BookOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, Users, CalendarDays, BookOpen, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
@@ -12,6 +13,23 @@ const TEACHING_LOADS_CACHE_VERSION = 'v2'
 const getTrainerDisplayName = (trainer) => (
   trainer?.trainer_name || trainer?.full_name || trainer?.username || trainer?.email || 'Unnamed trainer'
 )
+const getLoadOwner = (load) => {
+  if (load?.approval_status === 'for approval') {
+    return {
+      label: 'Created by',
+      name: load.assigned_by_name || 'Not set',
+      position: load.assigned_by_position || '',
+      tone: 'border-amber-200 bg-amber-50 text-amber-800',
+    }
+  }
+
+  return {
+    label: 'Reviewed by',
+    name: load?.approved_by_name || 'Not set',
+    position: load?.approved_by_position || '',
+    tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  }
+}
 
 const getTotalPages = (payload, page) => {
   if (Number.isFinite(payload?.totalPages) && payload.totalPages > 0) {
@@ -39,6 +57,8 @@ export default function TeachingLoads() {
   const [selectedProgram, setSelectedProgram] = useState(null)
   const [selectedTrainer, setSelectedTrainer] = useState(null)
   const [selectedLoad, setSelectedLoad] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [viewMode, setViewMode] = useState('programs') // 'programs' or 'trainers'
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -49,15 +69,12 @@ export default function TeachingLoads() {
   const [expandedItems, setExpandedItems] = useState(new Set())
   const [teachingLoadsLoading, setTeachingLoadsLoading] = useState(false)
   const [allTeachingLoads, setAllTeachingLoads] = useState([])
+  const [programProgressFilter, setProgramProgressFilter] = useState('completed')
+  const [trainerProgressFilter, setTrainerProgressFilter] = useState('all')
 
-  // Load all teaching loads for badge counts by fetching for each program
-  const loadAllTeachingLoads = useCallback(async (programsList) => {
+  // Load all teaching loads summary for badge counts
+  const loadAllTeachingLoads = useCallback(async () => {
     try {
-      if (!programsList || programsList.length === 0) {
-        setAllTeachingLoads([])
-        return
-      }
-
       const cacheKey = cacheManager.generateKey('all_teaching_loads_combined')
       const cached = cacheManager.get(cacheKey)
       if (cached !== null) {
@@ -65,19 +82,13 @@ export default function TeachingLoads() {
         return
       }
 
-      // Load teaching loads for all programs in parallel
-      const promises = programsList.map(program =>
-        fetch(`${API_BASE}/api/admin/programs/${program.id}/teaching-loads`, {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        })
-          .then(res => res.ok ? res.json() : [])
-          .catch(() => [])
-      )
-
-      const results = await Promise.all(promises)
-      const allLoads = results.flat().filter(Boolean)
+      const response = await fetch(`${API_BASE}/api/admin/teaching-loads/summary`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      const allLoads = Array.isArray(data) ? data : []
       setAllTeachingLoads(allLoads)
-      cacheManager.set(cacheKey, allLoads, 300000)
+      cacheManager.set(cacheKey, allLoads, 60000)
     } catch (error) {
       console.error('Failed to load all teaching loads:', error)
       setAllTeachingLoads([])
@@ -187,42 +198,44 @@ export default function TeachingLoads() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
-      await Promise.all([
-        loadPrograms(1, ''),
-        loadTrainers(1, '')
-      ])
-      setLoading(false)
+      try {
+        if (viewMode === 'programs') {
+          await Promise.all([
+            loadPrograms(programPage, searchTerm),
+            loadAllTeachingLoads(),
+          ])
+          return
+        }
+
+        await Promise.all([
+          loadTrainers(trainerPage, searchTerm),
+          loadAllTeachingLoads(),
+        ])
+      } finally {
+        setLoading(false)
+      }
     }
+
     loadData()
-  }, [loadPrograms, loadTrainers])
-
-  // Load all teaching loads once programs are loaded
-  useEffect(() => {
-    if (programs.length > 0) {
-      loadAllTeachingLoads(programs)
-    }
-  }, [programs, loadAllTeachingLoads])
-
-  // Search handlers
-  useEffect(() => {
-    if (viewMode === 'programs') {
-      setProgramPage(1)
-      loadPrograms(1, searchTerm)
-    } else {
-      setTrainerPage(1)
-      loadTrainers(1, searchTerm)
-    }
-  }, [searchTerm, viewMode, loadPrograms, loadTrainers])
+  }, [loadAllTeachingLoads, loadPrograms, loadTrainers, programPage, searchTerm, trainerPage, viewMode])
 
   // Pagination handlers
   const handleProgramPageChange = (newPage) => {
     setProgramPage(newPage)
-    loadPrograms(newPage, searchTerm)
   }
 
   const handleTrainerPageChange = (newPage) => {
     setTrainerPage(newPage)
-    loadTrainers(newPage, searchTerm)
+  }
+
+  const handleSearchChange = (value) => {
+    setSearchTerm(value)
+    if (viewMode === 'programs') {
+      setProgramPage(1)
+      return
+    }
+
+    setTrainerPage(1)
   }
 
   // Toggle expanded state
@@ -264,6 +277,121 @@ export default function TeachingLoads() {
     setTeachingLoadsLoading(false)
   }
 
+  const refreshTeachingLoadCaches = useCallback(async () => {
+    cacheManager.clearPattern('teaching_loads_|program_teaching_loads|trainer_teaching_loads|all_teaching_loads_combined|schedules_trainer_programs|schedules_schedule')
+    await loadAllTeachingLoads()
+  }, [loadAllTeachingLoads])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    registerUser(user.user_id || user.id)
+
+    const handleScheduleUpdate = (payload) => {
+      if (!payload || !['assignment_approval_updated', 'assignment_created', 'assignment_deleted'].includes(payload.event_type)) return
+
+      cacheManager.clearPattern('teaching_loads_')
+      cacheManager.clearPattern('program_teaching_loads:')
+      cacheManager.clearPattern('trainer_teaching_loads:')
+      cacheManager.clearPattern('all_teaching_loads_combined')
+
+      refreshTeachingLoadCaches()
+
+      if (selectedProgram?.id === payload.program_id) {
+        loadProgramTeachingLoads(payload.program_id)
+      }
+
+      if (selectedTrainer?.id === payload.trainer_id) {
+        loadTrainerTeachingLoads(payload.trainer_id)
+      }
+    }
+
+    socket.on('schedule_update', handleScheduleUpdate)
+
+    return () => {
+      socket.off('schedule_update', handleScheduleUpdate)
+    }
+  }, [loadProgramTeachingLoads, loadTrainerTeachingLoads, refreshTeachingLoadCaches, selectedProgram?.id, selectedTrainer?.id, user?.id, user?.user_id])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    const socket = getSocket()
+    if (!socket) return
+
+    const handleProgramUpdate = (payload) => {
+      if (!payload?.event_type || !['program_deleted', 'program_created', 'program_updated'].includes(payload.event_type)) return
+
+      cacheManager.clearPattern('teaching_loads_programs:')
+      cacheManager.clearPattern('teaching_loads_trainers:')
+      cacheManager.clearPattern('programs_list:')
+      cacheManager.clearPattern('program_teaching_loads:')
+      cacheManager.clearPattern('trainer_teaching_loads:')
+      cacheManager.clearPattern('all_teaching_loads_combined')
+
+      refreshTeachingLoadCaches()
+      loadPrograms(programPage, searchTerm)
+
+      if (selectedProgram?.id === payload.program_id) {
+        if (payload.event_type === 'program_deleted') {
+          setSelectedProgram(null)
+          setSelectedLoad(null)
+        } else {
+          loadProgramTeachingLoads(payload.program_id)
+        }
+      }
+
+      if (selectedTrainer?.id) {
+        loadTrainerTeachingLoads(selectedTrainer.id)
+      }
+    }
+
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadProgramTeachingLoads, loadPrograms, loadTrainerTeachingLoads, programPage, refreshTeachingLoadCaches, searchTerm, selectedProgram?.id, selectedTrainer?.id, user?.id, user?.user_id])
+
+  const handleDeleteTeachingLoad = useCallback(async (load) => {
+    if (!load) return
+
+    setIsDeleting(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/trainers/${load.trainer_id}/programs/${load.program_id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || 'Failed to delete teaching load')
+      }
+
+      setDeleteTarget(null)
+      if (selectedLoad?.id === load.id) {
+        setSelectedLoad(null)
+      }
+
+      await refreshTeachingLoadCaches()
+
+      if (selectedProgram?.id === load.program_id) {
+        await loadProgramTeachingLoads(load.program_id)
+      }
+
+      if (selectedTrainer?.id === load.trainer_id) {
+        await loadTrainerTeachingLoads(load.trainer_id)
+      }
+    } catch (error) {
+      console.error('Failed to delete teaching load:', error)
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [loadProgramTeachingLoads, loadTrainerTeachingLoads, refreshTeachingLoadCaches, selectedLoad, selectedProgram, selectedTrainer])
+
   // Filter data based on search term
   const filteredPrograms = useMemo(() => {
     if (!searchTerm) return programs
@@ -286,7 +414,7 @@ export default function TeachingLoads() {
     <div className="space-y-6">
       {/* Header */}
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC NCR</p>
+        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC - NCR</p>
         <h1 className="mt-4 text-4xl font-black">Teaching Loads</h1>
         <p className="mt-3 max-w-2xl text-cyan-50/90">
           View and monitor approved teaching loads across all programs and trainers.
@@ -306,7 +434,7 @@ export default function TeachingLoads() {
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              <BookOpen className="mr-2 h-4 w-4 inline" />
+              <BookOpen className="mr-2 inline h-4 w-4" />
               Programs
             </button>
             <button
@@ -318,19 +446,19 @@ export default function TeachingLoads() {
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              <Users className="mr-2 h-4 w-4 inline" />
+              <Users className="mr-2 inline h-4 w-4" />
               Trainers
             </button>
           </div>
-          
-          <div className="relative">
+
+          <div className="relative lg:w-80">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder={`Search ${viewMode === 'programs' ? 'programs' : 'trainers'}...`}
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100 lg:w-80"
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
             />
           </div>
         </div>
@@ -356,6 +484,9 @@ export default function TeachingLoads() {
             currentPage={programPage}
             totalPages={programTotalPages}
             onPageChange={handleProgramPageChange}
+            progressFilter={programProgressFilter}
+            setProgressFilter={setProgramProgressFilter}
+            onRequestDelete={setDeleteTarget}
           />
         ) : (
           <TrainersView
@@ -371,6 +502,9 @@ export default function TeachingLoads() {
             currentPage={trainerPage}
             totalPages={trainerTotalPages}
             onPageChange={handleTrainerPageChange}
+            progressFilter={trainerProgressFilter}
+            setProgressFilter={setTrainerProgressFilter}
+            onRequestDelete={setDeleteTarget}
           />
         )}
       </section>
@@ -383,6 +517,41 @@ export default function TeachingLoads() {
           maxWidth="max-w-6xl"
         >
           <ReadOnlyCalendarView teachingLoad={selectedLoad} />
+        </ModalShell>
+      )}
+
+      {deleteTarget && (
+        <ModalShell
+          title="Delete Teaching Load"
+          onClose={() => setDeleteTarget(null)}
+          maxWidth="max-w-lg"
+        >
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
+              <p className="font-bold">This will permanently remove the teaching load.</p>
+              <p className="mt-2 text-sm">
+                {deleteTarget.program_name} - {deleteTarget.trainer_name}
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteTeachingLoad(deleteTarget)}
+                className="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Teaching Load'}
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>
@@ -402,10 +571,31 @@ function ProgramsView({
   toggleExpanded,
   currentPage,
   totalPages,
-  onPageChange
+  onPageChange,
+  progressFilter,
+  setProgressFilter,
+  onRequestDelete,
 }) {
+  const matchesProgressFilter = (load) => progressFilter === 'all' || load?.progress_status === progressFilter
+
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        {['all', 'completed'].map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setProgressFilter(option)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              progressFilter === option
+                ? 'bg-cyan-600 text-white'
+                : 'bg-white text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            {option === 'all' ? 'All Loads' : 'Completed Only'}
+          </button>
+        ))}
+      </div>
       {programs.length === 0 ? (
         <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
           No programs found.
@@ -426,7 +616,7 @@ function ProgramsView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {(selectedProgram?.id === program.id ? teachingLoads : allTeachingLoads).filter(load => load.program_id === program.id).length} trainers
+                    {(selectedProgram?.id === program.id ? teachingLoads : allTeachingLoads).filter((load) => load.program_id === program.id && matchesProgressFilter(load)).length} trainers
                   </span>
                   {expandedItems.has(program.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -447,7 +637,7 @@ function ProgramsView({
                 ) : (
                   <div className="space-y-2">
                     {teachingLoads
-                      .filter(load => load.program_id === program.id)
+                      .filter((load) => load.program_id === program.id && matchesProgressFilter(load))
                       .map((load) => (
                         <div
                           key={load.id}
@@ -457,6 +647,11 @@ function ProgramsView({
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{load.trainer_name}</p>
                             <p className="text-xs text-slate-600">{load.hours_per_day} hrs/day • {load.program_days} days</p>
+                          </div>
+                          <div className={`rounded-2xl border px-3 py-2 text-right text-xs ${getLoadOwner(load).tone}`}>
+                            <p className="font-semibold uppercase tracking-[0.16em]">{getLoadOwner(load).label}</p>
+                            <p className="mt-1 text-sm font-bold">{getLoadOwner(load).name}</p>
+                            {getLoadOwner(load).position && <p>{getLoadOwner(load).position}</p>}
                           </div>
                           <CalendarDays className="h-4 w-4 text-cyan-600" />
                         </div>
@@ -510,10 +705,31 @@ function TrainersView({
   toggleExpanded,
   currentPage,
   totalPages,
-  onPageChange
+  onPageChange,
+  progressFilter,
+  setProgressFilter,
+  onRequestDelete,
 }) {
+  const matchesProgressFilter = (load) => progressFilter === 'all' || load?.progress_status === progressFilter
+
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        {['all', 'in-progress', 'completed'].map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setProgressFilter(option)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              progressFilter === option
+                ? 'bg-cyan-600 text-white'
+                : 'bg-white text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            {option === 'all' ? 'All Loads' : option === 'in-progress' ? 'In Progress' : 'Completed'}
+          </button>
+        ))}
+      </div>
       {trainers.length === 0 ? (
         <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
           No trainers found.
@@ -530,11 +746,11 @@ function TrainersView({
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">{getTrainerDisplayName(trainer)}</h3>
                   <p className="text-sm text-slate-600">{trainer.email}</p>
-                  <p className="text-xs text-slate-500 mt-1">TM Number: {trainer.tm_number || 'Not set'}</p>
+                  <p className="text-xs text-slate-500 mt-1">TMC Level I Number: {trainer.tm_number || 'Not set'}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {(selectedTrainer?.id === trainer.id ? teachingLoads : allTeachingLoads).filter(load => load.trainer_id === trainer.id).length} programs
+                    {(selectedTrainer?.id === trainer.id ? teachingLoads : allTeachingLoads).filter((load) => load.trainer_id === trainer.id && matchesProgressFilter(load)).length} programs
                   </span>
                   {expandedItems.has(trainer.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -555,7 +771,7 @@ function TrainersView({
                 ) : (
                   <div className="space-y-2">
                     {teachingLoads
-                      .filter(load => load.trainer_id === trainer.id)
+                      .filter((load) => load.trainer_id === trainer.id && matchesProgressFilter(load))
                       .map((load) => (
                         <div
                           key={load.id}
@@ -565,6 +781,11 @@ function TrainersView({
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{load.program_name}</p>
                             <p className="text-xs text-slate-600">{load.program_type} • {load.hours_per_day} hrs/day</p>
+                          </div>
+                          <div className={`rounded-2xl border px-3 py-2 text-right text-xs ${getLoadOwner(load).tone}`}>
+                            <p className="font-semibold uppercase tracking-[0.16em]">{getLoadOwner(load).label}</p>
+                            <p className="mt-1 text-sm font-bold">{getLoadOwner(load).name}</p>
+                            {getLoadOwner(load).position && <p>{getLoadOwner(load).position}</p>}
                           </div>
                           <CalendarDays className="h-4 w-4 text-cyan-600" />
                         </div>
@@ -631,7 +852,7 @@ function ReadOnlyCalendarView({ teachingLoad }) {
   const STATUS_OPTIONS = [
     { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
     { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
-    { key: 'leave', label: 'Leave', color: 'bg-sky-500' },
+    { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
     { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
     { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
   ]

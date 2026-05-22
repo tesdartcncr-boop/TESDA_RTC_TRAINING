@@ -1,23 +1,27 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Mail, Pencil, Plus, Search, Trash2, User } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 
 const inputClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const formatDateOnly = (value) => (value ? String(value).split('T')[0] : '')
 
 const emptyTrainerValues = {
   username: '',
   email: '',
   password: '',
   trainer_name: '',
+  sex: '',
   first_name: '',
   middle_name: '',
   last_name: '',
@@ -45,7 +49,7 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
       setSelectedQualifications((current) => current.filter((qualification) => qualification.program_id !== program.id))
       return
     }
-    setSelectedQualifications((current) => [...current, { program_id: program.id, nttc_number: '' }])
+    setSelectedQualifications((current) => [...current, { program_id: program.id, nttc_number: '', nttc_expiration: '' }])
   }
 
   const updateNttcNumber = (programId, value) => {
@@ -56,11 +60,19 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
     )))
   }
 
+  const updateNttcExpiration = (programId, value) => {
+    setSelectedQualifications((current) => current.map((qualification) => (
+      qualification.program_id === programId
+        ? { ...qualification, nttc_expiration: value }
+        : qualification
+    )))
+  }
+
   return (
     <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-5">
       <div>
         <h4 className="text-lg font-bold text-slate-900">Qualifications</h4>
-        <p className="text-sm text-slate-600">Choose from created program names and add the matching NTTC number.</p>
+        <p className="text-sm text-slate-600">Choose from created program names and add the matching NTTC number and expiration date.</p>
       </div>
       <input
         type="text"
@@ -80,14 +92,28 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
                 <span className="font-medium text-slate-800">{program.name}</span>
               </label>
               {selected && (
-                <input
-                  type="text"
-                  id={`nttc_number_${program.id}`}
-                  value={selected.nttc_number || ''}
-                  onChange={(event) => updateNttcNumber(program.id, event.target.value)}
-                  placeholder="NTTC number"
-                  className={`${inputClassName} mt-3 text-sm`}
-                />
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="text"
+                    id={`nttc_number_${program.id}`}
+                    value={selected.nttc_number || ''}
+                    onChange={(event) => updateNttcNumber(program.id, event.target.value)}
+                    placeholder="NTTC number"
+                    className={`${inputClassName} text-sm`}
+                  />
+                  <div>
+                    <label htmlFor={`nttc_expiration_${program.id}`} className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      Expiration Date
+                    </label>
+                    <input
+                      type="date"
+                      id={`nttc_expiration_${program.id}`}
+                      value={formatDateOnly(selected.nttc_expiration)}
+                      onChange={(event) => updateNttcExpiration(program.id, event.target.value)}
+                      className={inputClassName}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )
@@ -142,6 +168,15 @@ function TrainerFormFields({ form, isEdit }) {
         <input id={`${mode}_trainer_name`} {...form.register('trainer_name')} placeholder="Optional display name" className={fieldClass} />
       </div>
       <div>
+        <label htmlFor={`${mode}_sex`} className="block text-sm font-semibold text-slate-700">Sex</label>
+        <select id={`${mode}_sex`} {...form.register('sex')} className={fieldClass}>
+          <option value="">Select sex</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          <option value="Prefer not to say">Prefer not to say</option>
+        </select>
+      </div>
+      <div>
         <label htmlFor={`${mode}_trainer_type`} className="block text-sm font-semibold text-slate-700">Trainer Type</label>
         <select id={`${mode}_trainer_type`} {...form.register('trainer_type')} className={fieldClass}>
           <option value="">Select trainer type</option>
@@ -150,11 +185,11 @@ function TrainerFormFields({ form, isEdit }) {
         </select>
       </div>
       <div>
-        <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TM Number</label>
-        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TM123456" className={fieldClass} />
+        <label htmlFor={`${mode}_tm_number`} className="block text-sm font-semibold text-slate-700">TMC Level I Number</label>
+        <input id={`${mode}_tm_number`} {...form.register('tm_number')} placeholder="e.g. TMC123456" className={fieldClass} />
       </div>
       <div>
-        <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TM Expiration</label>
+        <label htmlFor={`${mode}_tm_expiration`} className="block text-sm font-semibold text-slate-700">TMC Level I Expiration</label>
         <input id={`${mode}_tm_expiration`} type="date" {...form.register('tm_expiration')} className={fieldClass} />
       </div>
     </div>
@@ -175,6 +210,7 @@ TrainerFormFields.defaultProps = {
 export default function Trainers() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [trainers, setTrainers] = useState([])
   const [programs, setPrograms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -207,7 +243,7 @@ export default function Trainers() {
     cacheManager.clearPattern('stats_')
   }
 
-  const loadTrainers = async () => {
+  const loadTrainers = useCallback(async () => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('trainers_list', { search: searchTerm })
@@ -231,9 +267,9 @@ export default function Trainers() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [searchTerm])
 
-  const loadPrograms = async () => {
+  const loadPrograms = useCallback(async () => {
     try {
       const cacheKey = cacheManager.generateKey('programs_list', { search: null })
       const cached = cacheManager.get(cacheKey)
@@ -253,7 +289,7 @@ export default function Trainers() {
       console.error(error)
       toast.error('Failed to load programs')
     }
-  }
+  }, [])
 
   const loadQualifications = async (trainerId) => {
     const cacheKey = cacheManager.generateKey('trainer_qualifications', { trainer_id: trainerId })
@@ -269,6 +305,7 @@ export default function Trainers() {
     const qualifications = (data.data || []).map((qualification) => ({
       program_id: qualification.program_id,
       nttc_number: qualification.nttc_number || '',
+      nttc_expiration: qualification.nttc_expiration ? formatDateOnly(qualification.nttc_expiration) : '',
     }))
     cacheManager.set(cacheKey, qualifications)
     return qualifications
@@ -276,18 +313,46 @@ export default function Trainers() {
 
   const qualificationSignature = (qualifications) => (
     [...qualifications]
-      .map((qualification) => `${qualification.program_id}:${qualification.nttc_number || ''}`)
+      .map((qualification) => `${qualification.program_id}:${qualification.nttc_number || ''}:${qualification.nttc_expiration || ''}`)
       .sort((left, right) => left.localeCompare(right))
       .join('|')
   )
 
   useEffect(() => {
     loadTrainers()
-  }, [searchTerm])
+  }, [loadTrainers])
 
   useEffect(() => {
     loadPrograms()
-  }, [])
+  }, [loadPrograms])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    const socket = getSocket()
+    if (!socket) return undefined
+
+    registerUser(user.user_id || user.id)
+
+    const handleTrainerUpdate = () => {
+      invalidateTrainerCaches()
+      loadTrainers()
+    }
+
+    const handleProgramUpdate = () => {
+      cacheManager.clearPattern('programs_list:')
+      cacheManager.clearPattern('trainer_qualifications:')
+      loadPrograms()
+    }
+
+    socket.on('trainer_update', handleTrainerUpdate)
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('trainer_update', handleTrainerUpdate)
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadPrograms, loadTrainers, user?.id, user?.user_id])
 
   useEffect(() => {
     if (location.state?.openCreateModal) {
@@ -297,13 +362,21 @@ export default function Trainers() {
   }, [location, navigate])
 
   const filteredTrainers = useMemo(() => {
-    if (!searchTerm.trim()) return trainers
-    const query = searchTerm.toLowerCase()
-    return trainers.filter((trainer) =>
-      [trainer.trainer_name, trainer.first_name, trainer.last_name, trainer.username, trainer.email]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(query))
-    )
+    const hasSearch = searchTerm.trim().length > 0
+    if (hasSearch) {
+      const query = searchTerm.toLowerCase()
+      return trainers.filter((trainer) =>
+        [trainer.trainer_name, trainer.first_name, trainer.last_name, trainer.username, trainer.email]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(query))
+      )
+    }
+
+    return [...trainers].sort((left, right) => {
+      const leftName = (left.trainer_name || `${left.first_name || ''} ${left.last_name || ''}`.trim() || left.username || left.email || '').trim()
+      const rightName = (right.trainer_name || `${right.first_name || ''} ${right.last_name || ''}`.trim() || right.username || right.email || '').trim()
+      return leftName.localeCompare(rightName)
+    })
   }, [trainers, searchTerm])
 
   const handleCreate = async (values) => {
@@ -329,6 +402,7 @@ export default function Trainers() {
       }
       toast.success('Trainer created successfully')
       invalidateTrainerCaches()
+      cacheManager.clearPattern('admin_dashboard_stats')
       createForm.reset(emptyTrainerValues)
       setCreateQualifications([])
       setShowCreateModal(false)
@@ -346,7 +420,7 @@ export default function Trainers() {
 
     const toUpsert = desiredQualifications.filter((qualification) => {
       const current = currentQualifications.find((item) => item.program_id === qualification.program_id)
-      return !current || current.nttc_number !== qualification.nttc_number
+      return !current || current.nttc_number !== qualification.nttc_number || current.nttc_expiration !== qualification.nttc_expiration
     })
     const toRemove = currentIds.filter((programId) => !desiredIds.has(programId))
 
@@ -374,6 +448,7 @@ export default function Trainers() {
       ...emptyTrainerValues,
       email: trainer.email || '',
       trainer_name: trainer.trainer_name || '',
+      sex: trainer.sex || '',
       first_name: trainer.first_name || '',
       middle_name: trainer.middle_name || '',
       last_name: trainer.last_name || '',
@@ -396,6 +471,7 @@ export default function Trainers() {
       const payload = Object.entries({
         email: values.email,
         trainer_name: values.trainer_name,
+        sex: values.sex,
         first_name: values.first_name,
         middle_name: values.middle_name,
         last_name: values.last_name,
@@ -444,6 +520,7 @@ export default function Trainers() {
       }
       toast.success('Trainer updated successfully')
       invalidateTrainerCaches()
+      cacheManager.clearPattern('admin_dashboard_stats')
       setEditingTrainer(null)
       loadTrainers()
     } catch (error) {
@@ -467,6 +544,7 @@ export default function Trainers() {
       }
       toast.success('Trainer deleted successfully')
       invalidateTrainerCaches()
+      cacheManager.clearPattern('admin_dashboard_stats')
       loadTrainers()
     } catch (error) {
       toast.error(error.message)
@@ -561,8 +639,9 @@ export default function Trainers() {
               </div>
               <div className="mt-5 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
                 <p><span className="font-semibold text-slate-800">Type:</span> {trainer.trainer_type || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">TM Number:</span> {trainer.tm_number || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">TM Expiration:</span> {trainer.tm_expiration ? trainer.tm_expiration.split('T')[0] : 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">Sex:</span> {trainer.sex || 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">TMC Level I Number:</span> {trainer.tm_number || 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">TMC Level I Expiration:</span> {trainer.tm_expiration ? trainer.tm_expiration.split('T')[0] : 'Not set'}</p>
                 <p><span className="font-semibold text-slate-800">Created:</span> {trainer.created_at?.split('T')[0]}</p>
               </div>
               <div className="mt-6 flex gap-3">
@@ -633,6 +712,7 @@ QualificationSelector.propTypes = {
   selectedQualifications: PropTypes.arrayOf(PropTypes.shape({
     program_id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
     nttc_number: PropTypes.string,
+    nttc_expiration: PropTypes.string,
   })).isRequired,
   setSelectedQualifications: PropTypes.func.isRequired,
 }

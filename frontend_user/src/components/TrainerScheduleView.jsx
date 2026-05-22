@@ -10,16 +10,29 @@ const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.g
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
   { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
-  { key: 'leave', label: 'Leave', color: 'bg-sky-500' },
+  { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
   { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
   { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
 ]
+
+const isFutureDay = (scheduleDate) => {
+  if (!scheduleDate) return false
+
+  const parsed = new Date(`${String(scheduleDate).split('T')[0]}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return false
+
+  const today = new Date()
+  today.setHours(23, 59, 59, 999)
+  return parsed.getTime() > today.getTime()
+}
 
 export default function TrainerScheduleView({ program, trainerId }) {
   const [scheduleDays, setScheduleDays] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedDay, setSelectedDay] = useState(null)
   const calendarDays = Math.max(program.program_days || 0, scheduleDays.length)
+  const progressLabel = program.progress_status === 'completed' ? 'Completed' : 'In Progress'
+  const progressTone = program.progress_status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
 
   const loadSchedule = async () => {
     setLoading(true)
@@ -58,6 +71,13 @@ export default function TrainerScheduleView({ program, trainerId }) {
 
   const handleStatusChange = async (status) => {
     if (!selectedDay) return
+
+    const selectedEntry = dayMap[selectedDay]
+    if (isFutureDay(selectedEntry?.schedule_date)) {
+      toast.error('Future days cannot be updated yet')
+      return
+    }
+
     try {
       const currentStatus = dayMap[selectedDay]?.status
       const nextStatus = currentStatus === status ? null : status
@@ -87,61 +107,47 @@ export default function TrainerScheduleView({ program, trainerId }) {
     }
   }
 
-  // Helper function to generate calendar weeks based on actual start date
-const generateCalendarWeeks = (totalDays, startDate) => {
-  const weeks = []
-  let currentDay = 1
-  
-  // Calculate the starting day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-  let startingDayOfWeek = 0 // Default to Sunday if no start date
-  if (startDate) {
-    const date = new Date(startDate)
-    startingDayOfWeek = date.getDay() // 0 = Sunday, 1 = Monday, etc.
-  }
-  
-  // Adjust to Monday-based week (0 = Monday, 1 = Tuesday, ..., 6 = Sunday)
-  const mondayBasedStart = startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1
-  
-  // Create first week with leading empty slots
-  let week = []
-  
-  // Add empty slots for days before the start date
-  for (let i = 0; i < mondayBasedStart; i++) {
-    week.push(null)
-  }
-  
-  // Add training days
-  while (currentDay <= totalDays) {
-    // If current day in week
-    if (week.length < 7) {
-      const dayOfWeekInWeek = week.length
-      const isWeekend = dayOfWeekInWeek === 5 || dayOfWeekInWeek === 6 // Saturday or Sunday
-      
-      week.push({
-        dayNumber: currentDay,
-        dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dayOfWeekInWeek],
-        isWeekend: false
-      })
-      currentDay++
-      
-      // If week is complete
-      if (week.length === 7) {
-        weeks.push(week)
-        week = []
+  // Helper function to generate calendar weeks using weekday slots first,
+  // then fixed weekend placeholders to match the admin calendar layout.
+  const generateCalendarWeeks = (totalDays) => {
+    const weeks = []
+    let currentDay = 1
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+    const weekendLabels = ['Sat', 'Sun']
+
+    while (currentDay <= totalDays) {
+      const week = []
+
+      for (let i = 0; i < 5; i++) {
+        if (currentDay <= totalDays) {
+          week.push({
+            dayNumber: currentDay,
+            dayName: weekdayLabels[i],
+            isWeekend: false,
+          })
+          currentDay++
+        } else {
+          week.push({
+            dayNumber: null,
+            dayName: weekdayLabels[i],
+            isWeekend: false,
+          })
+        }
       }
+
+      for (let i = 0; i < 2; i++) {
+        week.push({
+          dayNumber: null,
+          dayName: weekendLabels[i],
+          isWeekend: true,
+        })
+      }
+
+      weeks.push(week)
     }
+
+    return weeks
   }
-  
-  // Add remaining empty slots to complete the last week
-  if (week.length > 0) {
-    while (week.length < 7) {
-      week.push(null)
-    }
-    weeks.push(week)
-  }
-  
-  return weeks
-}
 
 return (
     <div className="space-y-6">
@@ -153,6 +159,14 @@ return (
               <h2 className="text-2xl font-black text-slate-900">{program.program_name}</h2>
             </div>
             <p className="mt-2 text-sm text-slate-600">{program.program_type} • {program.program_total_hours || 0} total hours</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] ${progressTone}`}>
+                {progressLabel}
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-700">
+                {program.schedule_marked_days || 0}/{program.schedule_total_days || program.program_days || 0} days marked
+              </span>
+            </div>
           </div>
           <div className="rounded-3xl border border-cyan-200 bg-cyan-50 px-5 py-4 text-sm text-cyan-900">
             <p><span className="font-semibold">Hours per day:</span> {program.hours_per_day}</p>
@@ -177,18 +191,18 @@ return (
               
               {/* Calendar Weeks */}
               <div className="space-y-1">
-                {generateCalendarWeeks(calendarDays, program.schedule_date).map((week, weekIndex) => (
-                  <div key={weekIndex} className="grid grid-cols-7 gap-1">
-                    {week.map((day, dayIndex) => {
-                      if (day === null) {
+                {generateCalendarWeeks(calendarDays).map((week) => (
+                  <div key={`week-${week[0]?.dayNumber}`} className="grid grid-cols-7 gap-1">
+                    {week.map((day) => {
+                      if (day.dayNumber === null && !day.isWeekend) {
                         return (
-                          <div key={`empty-${dayIndex}`} className="aspect-square" />
+                          <div key={`placeholder-${day.dayName}`} className="aspect-square" />
                         )
                       }
                       
                       if (day.isWeekend) {
                         return (
-                          <div key={`weekend-${dayIndex}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
+                          <div key={`weekend-${day.dayName}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
                             <p className="text-xs font-medium text-slate-400">{day.dayName}</p>
                           </div>
                         )
@@ -197,13 +211,15 @@ return (
                       const entry = dayMap[day.dayNumber]
                       const status = entry?.status
                       const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+                      const locked = isFutureDay(entry?.schedule_date)
                       
                       return (
                         <button
                           type="button"
                           key={day.dayNumber}
-                          onClick={() => setSelectedDay(day.dayNumber)}
-                          className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center transition-all hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm"
+                          onClick={() => !locked && setSelectedDay(day.dayNumber)}
+                          disabled={locked}
+                          className={`aspect-square rounded-lg border border-slate-200 p-2 text-center transition-all ${locked ? 'cursor-not-allowed bg-slate-50 opacity-60' : 'bg-white hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm'}`}
                         >
                           <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
                           <div className="mt-1 flex justify-center">
@@ -212,7 +228,7 @@ return (
                             </span>
                           </div>
                           <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
-                            {status || 'open'}
+                            {locked ? 'locked' : (status || 'open')}
                           </p>
                         </button>
                       )
@@ -240,7 +256,7 @@ return (
       {selectedDay && (
         <ModalShell title={`Update Day ${selectedDay}`} onClose={() => setSelectedDay(null)} maxWidth="max-w-3xl">
           <p className="mb-4 text-sm text-slate-600">
-            Choose a status for this day. If day is not marked complete, the system automatically adds another weekday at the end of the calendar.
+            Choose a status for this day. Future days stay locked until their schedule date arrives.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {STATUS_OPTIONS.map((option) => (
@@ -274,6 +290,9 @@ TrainerScheduleView.propTypes = {
     hours_per_day: PropTypes.number.isRequired,
     program_days: PropTypes.number.isRequired,
     schedule_date: PropTypes.string,
+    progress_status: PropTypes.string,
+    schedule_marked_days: PropTypes.number,
+    schedule_total_days: PropTypes.number,
   }).isRequired,
   trainerId: PropTypes.number.isRequired,
 }

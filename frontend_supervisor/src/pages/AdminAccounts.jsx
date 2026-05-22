@@ -26,6 +26,8 @@ export default function AdminAccounts() {
       username: '',
       email: '',
       full_name: '',
+      sex: '',
+      position: '',
       password: '',
       user_type: roleFilter === 'supervisor' ? 'supervisor' : 'admin',
     },
@@ -35,6 +37,8 @@ export default function AdminAccounts() {
     defaultValues: {
       email: '',
       full_name: '',
+      sex: '',
+      position: '',
       password: '',
       is_active: true,
     },
@@ -102,6 +106,8 @@ export default function AdminAccounts() {
     editForm.reset({
       email: account.email,
       full_name: account.full_name || '',
+      sex: account.sex || '',
+      position: account.position || '',
       password: '',
       is_active: account.is_active,
     })
@@ -113,6 +119,8 @@ export default function AdminAccounts() {
       const payload = {
         email: values.email,
         full_name: values.full_name,
+        sex: values.sex || null,
+        position: values.position || null,
         is_active: values.is_active,
       }
       if (values.password) payload.password = values.password
@@ -161,10 +169,10 @@ export default function AdminAccounts() {
     }
   }
 
-  const pageTitle = user?.user_type === 'supervisor' ? 'Supervisor Accounts' : 'Admin Accounts'
+  const pageTitle = user?.user_type === 'supervisor' ? 'Center Chief Accounts' : 'Admin Accounts'
   const pageDescription = user?.user_type === 'supervisor'
-    ? 'Review supervisor accounts and manage password updates.'
-    : 'Create and manage admin or supervisor accounts with email-based password recovery.'
+    ? 'Review center chief accounts and manage password updates.'
+    : 'Create and manage admin or center chief accounts with email-based password recovery.'
 
   return (
     <div className="space-y-6">
@@ -195,8 +203,8 @@ export default function AdminAccounts() {
         <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading accounts...</div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-2">
-          {accounts.map((account) => (
-            <div key={account.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            {accounts.map((account) => (
+              <div key={account.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
                   {account.user_type === 'admin' ? <ShieldCheck className="h-7 w-7" /> : <User className="h-7 w-7" />}
@@ -208,6 +216,10 @@ export default function AdminAccounts() {
                   <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
                     <Mail className="h-4 w-4" />
                     <span>{account.email}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                    <p><span className="font-semibold text-slate-800">Sex:</span> {account.sex || 'Not set'}</p>
+                    <p><span className="font-semibold text-slate-800">Position:</span> {account.position || 'Not set'}</p>
                   </div>
                 </div>
               </div>
@@ -231,11 +243,11 @@ export default function AdminAccounts() {
             </div>
           ))}
 
-          {!accounts.length && (
-            <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
-              No accounts found.
-            </div>
-          )}
+            {!accounts.length && (
+              <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
+                No accounts found.
+              </div>
+            )}
         </div>
       )}
 
@@ -245,6 +257,19 @@ export default function AdminAccounts() {
             <div>
               <label className="block text-sm font-semibold text-slate-700">Full Name</label>
               <input {...createForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Sex</label>
+              <select {...createForm.register('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+                <option value="">Select sex</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Position</label>
+              <input {...createForm.register('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Username</label>
@@ -262,7 +287,7 @@ export default function AdminAccounts() {
               <label className="block text-sm font-semibold text-slate-700">Account Role</label>
               <select {...createForm.register('user_type')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
                 <option value="admin">Admin</option>
-                <option value="supervisor">Supervisor</option>
+                <option value="supervisor">Center Chief</option>
               </select>
             </div>
             <div className="flex justify-end gap-3">
@@ -279,6 +304,19 @@ export default function AdminAccounts() {
             <div>
               <label className="block text-sm font-semibold text-slate-700">Full Name</label>
               <input {...editForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Sex</label>
+              <select {...editForm.register('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+                <option value="">Select sex</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Position</label>
+              <input {...editForm.register('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Email</label>

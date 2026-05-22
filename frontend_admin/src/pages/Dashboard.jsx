@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart3, Briefcase, ClipboardCheck, PlusCircle, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { cacheManager } from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
@@ -11,22 +12,31 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/admin/dashboard/stats`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')}` },
-        })
-        const data = await response.json()
-        setStats(data)
-      } catch {
-        setStats(null)
-      } finally {
-        setLoading(false)
+  const loadStats = useCallback(async () => {
+    try {
+      const cacheKey = cacheManager.generateKey('admin_dashboard_stats')
+      const cached = cacheManager.get(cacheKey)
+      if (cached !== null) {
+        setStats(cached)
+        return
       }
+
+      const response = await fetch(`${API_BASE}/api/admin/dashboard/stats`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')}` },
+      })
+      const data = await response.json()
+      setStats(data)
+      cacheManager.set(cacheKey, data)
+    } catch {
+      setStats(null)
+    } finally {
+      setLoading(false)
     }
-    loadStats()
   }, [])
+
+  useEffect(() => {
+    loadStats()
+  }, [loadStats])
 
   const quickActions = user?.user_type === 'admin'
     ? [
@@ -38,7 +48,7 @@ export default function Dashboard() {
         },
         {
           title: 'Add Program',
-          description: 'Create a new program with type, validity, and total hours.',
+          description: 'Create a new program with type, validity date, and nominal duration.',
           icon: PlusCircle,
           action: () => navigate('/programs', { state: { openCreateModal: true } }),
         },
@@ -57,8 +67,8 @@ export default function Dashboard() {
           action: () => navigate('/teaching-loads'),
         },
         {
-          title: 'Supervisor Accounts',
-          description: 'Review supervisor accounts and manage password updates.',
+          title: 'Center Chief Accounts',
+          description: 'Review center chief accounts and manage password updates.',
           icon: Users,
           action: () => navigate('/admin-accounts?role=supervisor'),
         },
@@ -80,7 +90,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 sm:space-y-8">
       <section className="rounded-[1.5rem] sm:rounded-[2rem] bg-gradient-to-br from-slate-950 via-sky-900 to-cyan-700 p-4 sm:p-6 lg:p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
-        <p className="text-xs sm:text-sm font-bold uppercase tracking-[0.24em] text-sky-100">TESDA RTC NCR</p>
+        <p className="text-xs sm:text-sm font-bold uppercase tracking-[0.24em] text-sky-100">TESDA RTC - NCR</p>
         <h1 className="mt-2 sm:mt-4 text-2xl sm:text-3xl lg:text-4xl font-black leading-tight">
           {user?.user_type === 'admin' ? 'Admin Dashboard' : 'Supervisor Dashboard'}
         </h1>
@@ -126,7 +136,7 @@ export default function Dashboard() {
         <section className="grid gap-4 sm:gap-6 lg:grid-cols-2">
           <div className="rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
             <h3 className="text-base sm:text-lg font-bold text-slate-900">Recent Trainers</h3>
-            <div className="mt-3 sm:mt-4 space-y-2 sm:space-y-3">
+            <div className="mt-3 sm:mt-4 max-h-[20rem] space-y-2 overflow-y-auto pr-1 sm:space-y-3">
               {(stats.recent_trainers || []).length === 0 && <p className="text-xs sm:text-sm text-slate-500">No trainer records yet.</p>}
               {(stats.recent_trainers || []).map((trainer) => (
                 <div key={trainer.id} className="rounded-xl sm:rounded-2xl border border-slate-200 px-3 py-2 sm:px-4 sm:py-3">
@@ -139,7 +149,7 @@ export default function Dashboard() {
 
           <div className="rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
             <h3 className="text-base sm:text-lg font-bold text-slate-900">Recent Programs</h3>
-            <div className="mt-3 sm:mt-4 space-y-2 sm:space-y-3">
+            <div className="mt-3 sm:mt-4 max-h-[20rem] space-y-2 overflow-y-auto pr-1 sm:space-y-3">
               {(stats.recent_programs || []).length === 0 && <p className="text-xs sm:text-sm text-slate-500">No program records yet.</p>}
               {(stats.recent_programs || []).map((program) => (
                 <div key={program.id} className="rounded-xl sm:rounded-2xl border border-slate-200 px-3 py-2 sm:px-4 sm:py-3">

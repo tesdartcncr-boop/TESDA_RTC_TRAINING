@@ -10,6 +10,7 @@ from ..schemas import (
     MessageResponse,
     MessageUpdate,
 )
+from ..socket_manager import emit_to_users
 from ..supabase_rest import SupabaseAPIError, get_public_error_message, insert_row, select_rows, select_one, update_row
 
 router = APIRouter()
@@ -26,6 +27,9 @@ USER_TYPE_SUPERVISOR = "eq.supervisor"
 USER_SELECT_FIELDS = "id,username,full_name,email,user_type"
 MANAGEMENT_USER_TYPES = {"admin", "supervisor"}
 ALLOWED_MESSAGE_TYPES = {"issue", "inquiry", "report", "other"}
+ORDER_CREATED_AT_DESC = "created_at.desc"
+DELETED_BY_RECIPIENT_FILTER = "(is_deleted_by_recipient.eq.false,is_deleted_by_recipient.is.null)"
+DELETED_BY_SENDER_FILTER = "(is_deleted_by_sender.eq.false,is_deleted_by_sender.is.null)"
 
 
 def _unknown_user() -> dict:
@@ -90,6 +94,67 @@ def _load_visible_user_ids(current_user: dict) -> set[int]:
     return {current_user["id"]}
 
 
+def _load_management_user_ids() -> set[int]:
+    admin_users = select_rows(
+        "users",
+        filters={"user_type": USER_TYPE_ADMIN, "is_active": FILTER_TRUE},
+        select="id",
+    )
+    supervisor_users = select_rows(
+        "users",
+        filters={"user_type": USER_TYPE_SUPERVISOR, "is_active": FILTER_TRUE},
+        select="id",
+    )
+    return {user["id"] for user in admin_users + supervisor_users}
+
+
+async def _broadcast_message_event(event_type: str, message: dict, targets: set[int]):
+    payload = {
+        "event_type": event_type,
+        "message_id": message.get("id"),
+        "sender_id": message.get("sender_id"),
+        "recipient_id": message.get("recipient_id"),
+        "reply_to_id": message.get("reply_to_id"),
+        "data": message,
+    }
+    await emit_to_users(event_type, payload, targets)
+
+
+def _message_event_targets(message: dict) -> set[int]:
+    targets = {message.get("sender_id"), message.get("recipient_id")}
+    targets.update(_load_management_user_ids())
+    return {target for target in targets if target is not None}
+
+
+def _message_has_access(current_user: dict, message: dict) -> bool:
+    if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
+        visible_user_ids = _load_visible_user_ids(current_user)
+        return message["sender_id"] in visible_user_ids or message["recipient_id"] in visible_user_ids
+
+    return current_user["id"] in [message["sender_id"], message["recipient_id"]]
+
+
+def _resolve_reply_recipient_id(current_user: dict, original_message: dict) -> int:
+    if _normalize_user_type(current_user.get("user_type")) not in MANAGEMENT_USER_TYPES:
+        return (
+            original_message["sender_id"]
+            if current_user["id"] == original_message["recipient_id"]
+            else original_message["recipient_id"]
+        )
+
+    visible_user_ids = _load_visible_user_ids(current_user)
+    sender_is_management = original_message["sender_id"] in visible_user_ids
+    recipient_is_management = original_message["recipient_id"] in visible_user_ids
+
+    if not sender_is_management:
+        return original_message["sender_id"]
+    if not recipient_is_management:
+        return original_message["recipient_id"]
+    if current_user["id"] == original_message["recipient_id"]:
+        return original_message["sender_id"]
+    return original_message["recipient_id"]
+
+
 def _enrich_message(message: dict, users_map: dict[int, dict]) -> dict:
     sender = users_map.get(message.get("sender_id")) or _unknown_user()
     recipient = users_map.get(message.get("recipient_id")) or _unknown_user()
@@ -129,17 +194,17 @@ async def get_messages(
                 "messages",
                 filters={
                     "sender_id": f"in.({','.join(map(str, sorted(visible_user_ids)))})",
-                    "or": "(is_deleted_by_sender.eq.false,is_deleted_by_sender.is.null)",
+                    "or": DELETED_BY_SENDER_FILTER,
                 },
-                order="created_at.desc",
+                order=ORDER_CREATED_AT_DESC,
             )
             recipient_messages = select_rows(
                 "messages",
                 filters={
                     "recipient_id": f"in.({','.join(map(str, sorted(visible_user_ids)))})",
-                    "or": "(is_deleted_by_recipient.eq.false,is_deleted_by_recipient.is.null)",
+                    "or": DELETED_BY_RECIPIENT_FILTER,
                 },
-                order="created_at.desc",
+                order=ORDER_CREATED_AT_DESC,
             )
             all_messages = _dedupe_messages(sender_messages + recipient_messages)
         else:
@@ -147,9 +212,9 @@ async def get_messages(
                 "messages",
                 filters={
                     "sender_id": f"eq.{current_user['id']}",
-                    "or": "(is_deleted_by_sender.eq.false,is_deleted_by_sender.is.null)",
+                    "or": DELETED_BY_SENDER_FILTER,
                 },
-                order="created_at.desc",
+                order=ORDER_CREATED_AT_DESC,
             )
 
 
@@ -157,9 +222,9 @@ async def get_messages(
                 "messages",
                 filters={
                     "recipient_id": f"eq.{current_user['id']}",
-                    "or": "(is_deleted_by_recipient.eq.false,is_deleted_by_recipient.is.null)",
+                    "or": DELETED_BY_RECIPIENT_FILTER,
                 },
-                order="created_at.desc",
+                order=ORDER_CREATED_AT_DESC,
             )
             all_messages = sender_messages + recipient_messages
 
@@ -228,6 +293,7 @@ async def create_message(
         
         # Insert the message
         result = insert_row("messages", message)
+        await _broadcast_message_event("new_message", result, _message_event_targets(result))
         
         return result
     except HTTPException:
@@ -251,7 +317,7 @@ async def get_unread_count(current_user: CurrentUser):
                 filters={
                     "recipient_id": f"in.({','.join(map(str, sorted(visible_user_ids)))})",
                     "status": "eq.unread",
-                    "or": "(is_deleted_by_recipient.eq.false,is_deleted_by_recipient.is.null)",
+                    "or": DELETED_BY_RECIPIENT_FILTER,
                 },
                 select="id",
             )
@@ -262,7 +328,7 @@ async def get_unread_count(current_user: CurrentUser):
             filters={
                 "recipient_id": f"eq.{current_user['id']}",
                 "status": "eq.unread",
-                "or": "(is_deleted_by_recipient.eq.false,is_deleted_by_recipient.is.null)",
+                "or": DELETED_BY_RECIPIENT_FILTER,
             },
             select="id",
         )
@@ -300,14 +366,18 @@ async def get_message(
         
         # Mark as read if recipient
         if message["recipient_id"] == current_user["id"] and message["status"] == "unread":
+            read_at = datetime.now(timezone.utc).isoformat()
             update_row(
                 "messages",
                 {
                     "status": "read",
-                    "read_at": datetime.now(timezone.utc).isoformat(),
+                    "read_at": read_at,
                 },
                 filters={"id": f"eq.{message_id}"},
             )
+            message["status"] = "read"
+            message["read_at"] = read_at
+            await _broadcast_message_event("message_update", {**message, "event_type": "message_read"}, _message_event_targets(message))
 
         users_map = _load_users_map({message["sender_id"], message["recipient_id"]})
         message = _enrich_message(message, users_map)
@@ -354,7 +424,8 @@ async def update_message(
             updates["priority"] = update_data.priority
         
         if updates:
-            result = update_row("messages", updates, filters={"id": f"eq.{message_id}"})
+            result = update_row("messages", updates, filters={"id": f"eq.{message_id}"}) or {**message, **updates}
+            await _broadcast_message_event("message_update", {**result, "event_type": "message_updated"}, _message_event_targets(result))
             return result
         return message
     except SupabaseAPIError as exc:
@@ -373,38 +444,10 @@ async def reply_to_message(
         if not original_message:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_FOUND_MESSAGE)
 
-        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
-            visible_user_ids = _load_visible_user_ids(current_user)
-            has_access = (
-                original_message["sender_id"] in visible_user_ids
-                or original_message["recipient_id"] in visible_user_ids
-            )
-        else:
-            has_access = current_user["id"] in [original_message["sender_id"], original_message["recipient_id"]]
-
-        if not has_access:
+        if not _message_has_access(current_user, original_message):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE)
 
-        if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
-            # In shared management inbox, always route the reply to the non-management participant.
-            visible_user_ids = _load_visible_user_ids(current_user)
-            sender_is_management = original_message["sender_id"] in visible_user_ids
-            recipient_is_management = original_message["recipient_id"] in visible_user_ids
-
-            if not sender_is_management:
-                recipient_id = original_message["sender_id"]
-            elif not recipient_is_management:
-                recipient_id = original_message["recipient_id"]
-            elif current_user["id"] == original_message["recipient_id"]:
-                recipient_id = original_message["sender_id"]
-            else:
-                recipient_id = original_message["recipient_id"]
-        else:
-            recipient_id = (
-                original_message["sender_id"]
-                if current_user["id"] == original_message["recipient_id"]
-                else original_message["recipient_id"]
-            )
+        recipient_id = _resolve_reply_recipient_id(current_user, original_message)
 
         reply_message = {
             "sender_id": current_user["id"],
@@ -432,6 +475,9 @@ async def reply_to_message(
                 pass
 
         update_row("messages", {"status": "replied"}, filters={"id": f"eq.{message_id}"})
+        original_message = {**original_message, "status": "replied"}
+        await _broadcast_message_event("message_update", {**original_message, "event_type": "message_replied"}, _message_event_targets(original_message))
+        await _broadcast_message_event("new_message", {**result, "event_type": "message_reply"}, _message_event_targets(result))
         return result
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -491,6 +537,8 @@ async def delete_message(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ACCESS_DENIED_MESSAGE
             )
+
+        await _broadcast_message_event("message_update", {**message, "event_type": "message_deleted"}, _message_event_targets(message))
         
         return {"status": "deleted"}
     except SupabaseAPIError as exc:

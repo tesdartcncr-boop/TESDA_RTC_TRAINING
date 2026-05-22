@@ -4,8 +4,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user, get_password_hash
+from .schedules import clear_schedule_caches
 from ..cache_manager import cache_manager
-from ..schedule_utils import build_assignment_summary, sync_assignment_schedule
+from ..schedule_utils import build_assignment_summary, is_expired_date, sync_assignment_schedule
 from ..schemas import (
     TeachingLoadCreate,
     TeachingLoadResponse,
@@ -15,17 +16,19 @@ from ..schemas import (
     TrainerUpdate,
 )
 from ..socket_manager import broadcast_schedule_update, broadcast_trainer_update, send_notification_to_user
-from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
+from ..supabase_rest import SupabaseAPIError, count_rows, delete_rows, get_public_error_message, insert_row, select_one, select_rows, update_row
 from ..user_cleanup import delete_user_auth_artifacts, delete_user_messages
 
 router = APIRouter()
 
 ADMIN_ACCESS_DENIED = "Access denied. Admin access required."
+ACCESS_DENIED = "Access denied."
 TRAINER_NOT_FOUND = "Trainer not found"
 TRAINERS_CACHE_PATTERN = "trainers:*"
 QUALIFICATIONS_CACHE_PATTERN = "trainer_qualifications:*"
 SCHEDULES_CACHE_PATTERN = "schedules:*"
 CurrentUser = Annotated[dict, Depends(get_current_user)]
+ORDER_TRAINER_NAME_ASC = "trainer_name.asc,username.asc"
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -40,7 +43,7 @@ def ensure_admin(current_user: dict):
 
 def ensure_management_user(current_user: dict):
     if current_user.get("user_type") not in {"admin", "supervisor"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED)
 
 
 def get_trainer_or_404(trainer_id: int) -> dict:
@@ -94,6 +97,7 @@ def clear_trainer_caches():
     cache_manager.clear_pattern("schedules_schedule:*")
     cache_manager.clear_pattern("trainer_schedule:*")
     cache_manager.clear_pattern("trainer_programs:*")
+    cache_manager.clear_pattern("teaching_loads_summary:*")
 
 
 def get_qualification_cache_key(trainer_id: int) -> str:
@@ -105,14 +109,14 @@ def load_trainer_qualifications(trainer_id: int) -> list[dict]:
         "trainer_qualifications",
         filters={"trainer_id": f"eq.{trainer_id}"},
         order="created_at.desc",
-        select="id,trainer_id,program_id,nttc_number,created_at,updated_at"
+        select="id,trainer_id,program_id,nttc_number,nttc_expiration,created_at,updated_at"
     )
     
     # Batch fetch all programs at once instead of N+1 queries
     program_ids = {q['program_id'] for q in qualification_rows}
     programs_map = {}
     if program_ids:
-        programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type,hours,is_active")
+        programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"}, select="id,name,type,hours,validity,is_active")
         programs_map = {p['id']: p for p in programs}
     
     result = []
@@ -125,7 +129,15 @@ def load_trainer_qualifications(trainer_id: int) -> list[dict]:
     return result
 
 
-def create_or_update_qualification(trainer_id: int, program_id: int, nttc_number: str | None):
+def load_users_map(user_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not user_ids:
+        return {}
+
+    users = select_rows("users", filters={"id": f"in.({','.join(map(str, sorted(user_ids)))})"}, select="id,sex,position,email,full_name")
+    return {int(user["id"]): user for user in users if user.get("id") is not None}
+
+
+def create_or_update_qualification(trainer_id: int, program_id: int, nttc_number: str | None, nttc_expiration=None):
     existing = select_one(
         "trainer_qualifications",
         filters={
@@ -137,6 +149,7 @@ def create_or_update_qualification(trainer_id: int, program_id: int, nttc_number
         "trainer_id": trainer_id,
         "program_id": program_id,
         "nttc_number": nttc_number,
+        "nttc_expiration": nttc_expiration,
         "updated_at": datetime.now().isoformat(),
     }
     if existing:
@@ -170,35 +183,33 @@ async def get_trainers(
 
     try:
         filters = {"is_active": "eq.true"}
-        # Fetch only needed columns
-        all_trainers = select_rows("trainers", filters=filters, order="created_at.desc", select="id,user_id,username,trainer_name,first_name,last_name,tm_number,tm_expiration,nttc_number,nttc_expiration,is_active,created_at")
-
         if search:
-            search_lower = search.lower()
-            all_trainers = [
-                trainer for trainer in all_trainers
-                if search_lower in (trainer.get("trainer_name") or "").lower()
-                or search_lower in (trainer.get("username") or "").lower()
-                or search_lower in (trainer.get("first_name") or "").lower()
-                or search_lower in (trainer.get("last_name") or "").lower()
-            ]
+            filters["or"] = (
+                f"(trainer_name.ilike.%{search}%,username.ilike.%{search}%,"
+                f"first_name.ilike.%{search}%,last_name.ilike.%{search}%)"
+            )
 
-        total = len(all_trainers)
-        trainers = all_trainers[skip:skip + limit]
+        total = count_rows("trainers", filters=filters)
+        trainers = select_rows(
+            "trainers",
+            filters=filters,
+            order=ORDER_TRAINER_NAME_ASC,
+            limit=limit,
+            offset=skip,
+            select="id,user_id,username,trainer_name,first_name,last_name,tm_number,tm_expiration,nttc_number,nttc_expiration,is_active,created_at",
+        )
         total_pages = max(1, -(-total // limit))
         
         # Fetch user emails/names for this batch in one query instead of N queries
-        user_ids = [t['user_id'] for t in trainers]
-        users_map = {}
-        if user_ids:
-            # Use select with filter to get all users at once
-            users = select_rows("users", filters={"id": f"in.({','.join(map(str, user_ids))})"}, select="id,email,full_name")
-            users_map = {u['id']: u for u in users}
+        user_ids = {t['user_id'] for t in trainers if t.get('user_id') is not None}
+        users_map = load_users_map(user_ids)
         
         for trainer in trainers:
             user = users_map.get(trainer['user_id'], {})
             trainer["email"] = user.get("email")
             trainer["full_name"] = user.get("full_name")
+            trainer["sex"] = user.get("sex")
+            trainer["position"] = user.get("position")
         
         response = {
             "data": trainers,
@@ -237,6 +248,7 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
                 "username": trainer_data.username,
                 "email": trainer_data.email,
                 "full_name": trainer_name,
+                "sex": trainer_data.sex,
                 "password_hash": get_password_hash(trainer_data.password),
                 "user_type": "trainer",
                 "is_active": True,
@@ -265,7 +277,12 @@ async def create_trainer(trainer_data: TrainerCreate, current_user: CurrentUser)
             )
 
             for qualification in trainer_data.qualifications:
-                create_or_update_qualification(trainer["id"], qualification.program_id, qualification.nttc_number)
+                create_or_update_qualification(
+                    trainer["id"],
+                    qualification.program_id,
+                    qualification.nttc_number,
+                    qualification.nttc_expiration,
+                )
 
             clear_trainer_caches()
             await broadcast_trainer_update(trainer)
@@ -326,6 +343,7 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
                 {
                     "email": update_data["email"],
                     "full_name": build_trainer_name({**trainer, **trainer_updates}),
+                    "sex": update_data.get("sex", user.get("sex") if user else trainer.get("sex")),
                 },
                 filters={"id": f"eq.{trainer['user_id']}"},
             )
@@ -334,6 +352,7 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
                 "users",
                 {
                     "full_name": build_trainer_name({**trainer, **trainer_updates}),
+                    "sex": update_data.get("sex", user.get("sex") if user else trainer.get("sex")),
                 },
                 filters={"id": f"eq.{trainer['user_id']}"},
             )
@@ -365,10 +384,14 @@ async def update_trainer_profile(trainer_data: TrainerSelfUpdate, current_user: 
         if update_data and "trainer_name" not in update_data:
             update_data["trainer_name"] = build_trainer_name({**trainer, **update_data})
 
+        user_updates = {}
+        if "sex" in update_data:
+            user_updates["sex"] = update_data.pop("sex")
+
         updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer['id']}"}) or trainer
         update_row(
             "users",
-            {"full_name": build_trainer_name({**trainer, **update_data})},
+            {"full_name": build_trainer_name({**trainer, **update_data}), **user_updates},
             filters={"id": f"eq.{trainer['user_id']}"},
         )
         clear_trainer_caches()
@@ -394,6 +417,7 @@ async def delete_trainer(trainer_id: int, current_user: CurrentUser):
         delete_rows("notifications", filters={"user_id": f"eq.{trainer_user_id}"}, returning="minimal")
         delete_rows("trainers", filters={"id": f"eq.{trainer_id}"}, returning="minimal")
         delete_rows("users", filters={"id": f"eq.{trainer_user_id}"}, returning="minimal")
+        clear_schedule_caches()
         clear_trainer_caches()
         trainer["deleted"] = True
         await broadcast_trainer_update(trainer)
@@ -408,7 +432,7 @@ async def get_trainer_qualifications(trainer_id: int, current_user: CurrentUser)
     try:
         trainer = get_trainer_or_404(trainer_id)
         if current_user.get("user_type") not in {"admin", "supervisor"} and trainer.get("username") != current_user.get("username"):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED)
 
         cache_key = get_qualification_cache_key(trainer_id)
         cached = cache_manager.get(cache_key)
@@ -428,11 +452,12 @@ async def add_trainer_qualification(trainer_id: int, payload: dict[str, Any], cu
 
     program_id = int(payload.get("program_id"))
     nttc_number = payload.get("nttc_number")
+    nttc_expiration = payload.get("nttc_expiration")
 
     try:
         get_trainer_or_404(trainer_id)
         get_program_or_404(program_id)
-        qualification = create_or_update_qualification(trainer_id, program_id, nttc_number)
+        qualification = create_or_update_qualification(trainer_id, program_id, nttc_number, nttc_expiration)
         clear_trainer_caches()
         return qualification
     except SupabaseAPIError as exc:
@@ -472,30 +497,37 @@ async def assign_program_to_trainer(
     try:
         trainer = get_trainer_or_404(trainer_id)
         tm_expiration = trainer.get("tm_expiration")
-        if tm_expiration:
-            if isinstance(tm_expiration, datetime):
-                tm_expiration_date = tm_expiration.date()
-            elif isinstance(tm_expiration, date):
-                tm_expiration_date = tm_expiration
-            else:
-                tm_expiration_date = datetime.fromisoformat(str(tm_expiration)).date()
-            if tm_expiration_date < date.today():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Trainer's TM is expired.",
-                )
+        if is_expired_date(tm_expiration):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Trainer's TM is expired.",
+            )
+
         program = get_program_or_404(assignment.program_id)
+        if is_expired_date(program.get("validity")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Program validity has expired.",
+            )
+
         qualification = select_one(
             "trainer_qualifications",
             filters={
                 "trainer_id": f"eq.{trainer_id}",
                 "program_id": f"eq.{assignment.program_id}",
             },
+            select="id,trainer_id,program_id,nttc_number,nttc_expiration",
         )
         if not qualification:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Trainer is not qualified for the selected program.",
+            )
+
+        if is_expired_date(qualification.get("nttc_expiration")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Trainer's NTTC for this program is expired.",
             )
 
         existing = select_one(
@@ -532,6 +564,7 @@ async def assign_program_to_trainer(
             {
                 "event_type": "assignment_created",
                 "trainer_id": trainer_id,
+                "trainer_user_id": trainer.get("user_id"),
                 "program_id": assignment.program_id,
                 "data": summary,
             }
@@ -551,13 +584,13 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
     try:
         trainer = get_trainer_or_404(trainer_id)
         if current_user.get("user_type") not in {"admin", "supervisor"} and trainer.get("username") != current_user.get("username"):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED)
 
         assignments = select_rows(
             "trainer_programs",
             filters={"trainer_id": f"eq.{trainer_id}"},
             order="created_at.desc",
-            select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,approved_by,approved_at,created_at"
+            select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,assigned_by,approved_by,approved_at,created_at"
         )
 
         # Batch fetch all programs at once
@@ -586,10 +619,10 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
 
 @router.delete("/{trainer_id}/programs/{program_id}")
 async def remove_program_from_trainer(trainer_id: int, program_id: int, current_user: CurrentUser):
-    ensure_admin(current_user)
+    ensure_management_user(current_user)
 
     try:
-        get_trainer_or_404(trainer_id)
+        trainer = get_trainer_or_404(trainer_id)
         delete_rows(
             "schedules",
             filters={
@@ -611,6 +644,7 @@ async def remove_program_from_trainer(trainer_id: int, program_id: int, current_
             {
                 "event_type": "assignment_deleted",
                 "trainer_id": trainer_id,
+                "trainer_user_id": trainer.get("user_id"),
                 "program_id": program_id,
             }
         )

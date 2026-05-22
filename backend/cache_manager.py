@@ -1,12 +1,10 @@
-"""
-Redis cache manager for caching API responses
-"""
-import os
-import redis
-import json
 import logging
-from typing import Any, Optional
 from datetime import timedelta
+import json
+import os
+from typing import Any, Optional
+
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,7 @@ class CacheManager:
             return None
         try:
             value = self.redis_client.get(key)
-            if value:
+            if value is not None:
                 logger.debug(f"Cache hit for key: {key}")
                 return json.loads(value)
             logger.debug(f"Cache miss for key: {key}")
@@ -55,14 +53,30 @@ class CacheManager:
             logger.exception("Error retrieving from cache: %s", e)
             return None
 
-    def set(self, key: str, value: Any, ttl: Optional[timedelta] = None) -> bool:
+    def _normalize_ttl(self, ttl: Optional[timedelta | int | float]) -> timedelta:
+        if ttl is None:
+            return self.ttl
+
+        if isinstance(ttl, timedelta):
+            return ttl
+
+        if isinstance(ttl, (int, float)):
+            # Existing callers pass milliseconds (for example 300000 for 5 minutes).
+            if ttl >= 1000:
+                return timedelta(milliseconds=ttl)
+            return timedelta(seconds=ttl)
+
+        logger.warning("Unsupported cache TTL %r, falling back to default", ttl)
+        return self.ttl
+
+    def set(self, key: str, value: Any, ttl: Optional[timedelta | int | float] = None) -> bool:
         """Set value in cache with TTL"""
         if not self.enabled:
             return False
         try:
-            ttl = ttl or self.ttl
-            self.redis_client.setex(key, ttl, json.dumps(value))
-            logger.debug(f"Cache set for key: {key}")
+            normalized_ttl = self._normalize_ttl(ttl)
+            self.redis_client.setex(key, normalized_ttl, json.dumps(value))
+            logger.debug("Cache set for key: %s ttl=%ss", key, int(normalized_ttl.total_seconds()))
             return True
         except Exception as e:
             logger.exception("Error setting cache: %s", e)
@@ -85,7 +99,7 @@ class CacheManager:
         if not self.enabled:
             return 0
         try:
-            keys = self.redis_client.keys(pattern)
+            keys = list(self.redis_client.scan_iter(match=pattern))
             if keys:
                 deleted = self.redis_client.delete(*keys)
                 logger.debug(f"Cleared {deleted} cache entries matching pattern: {pattern}")

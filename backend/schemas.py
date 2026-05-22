@@ -38,6 +38,8 @@ class UserBase(BaseModel):
     username: str
     email: EmailStr
     full_name: Optional[str] = None
+    sex: Optional[str] = None
+    position: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -50,6 +52,8 @@ class UserResponse(BaseModel):
     username: str
     email: str
     full_name: Optional[str] = None
+    sex: Optional[str] = None
+    position: Optional[str] = None
     user_type: str
     is_active: bool
     created_at: datetime
@@ -96,6 +100,7 @@ class OTPVerify(BaseModel):
 class TrainerQualificationInput(BaseModel):
     program_id: int
     nttc_number: Optional[str] = None
+    nttc_expiration: Optional[date] = None
 
 
 class TrainerQualificationResponse(BaseModel):
@@ -103,6 +108,7 @@ class TrainerQualificationResponse(BaseModel):
     trainer_id: int
     program_id: int
     nttc_number: Optional[str] = None
+    nttc_expiration: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -115,6 +121,7 @@ class TrainerCreate(BaseModel):
     email: EmailStr
     password: str
     trainer_name: Optional[str] = None
+    sex: Optional[str] = None
     first_name: Optional[str] = None
     middle_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -141,6 +148,7 @@ class TrainerUpdate(BaseModel):
     nttc_number: Optional[str] = None
     nttc_expiration: Optional[datetime] = None
     ctpr_recognition_number: Optional[str] = None
+    sex: Optional[str] = None
 
 
 class TrainerSelfUpdate(BaseModel):
@@ -155,6 +163,7 @@ class TrainerSelfUpdate(BaseModel):
     nttc_number: Optional[str] = None
     nttc_expiration: Optional[datetime] = None
     ctpr_recognition_number: Optional[str] = None
+    sex: Optional[str] = None
 
 
 class TrainerResponse(BaseModel):
@@ -174,6 +183,7 @@ class TrainerResponse(BaseModel):
     ctpr_recognition_number: Optional[str] = None
     is_active: bool
     created_at: datetime
+    sex: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -181,9 +191,9 @@ class TrainerResponse(BaseModel):
 
 class ProgramCreate(BaseModel):
     name: str
-    type: ProgramType
+    type: str
     description: Optional[str] = None
-    validity: Optional[str] = None
+    validity: Optional[date] = None
     hours: Optional[int] = None
     schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
@@ -193,8 +203,8 @@ class ProgramCreate(BaseModel):
 class ProgramUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    type: Optional[ProgramType] = None
-    validity: Optional[str] = None
+    type: Optional[str] = None
+    validity: Optional[date] = None
     hours: Optional[int] = None
     schedule: Optional[str] = None
     days: Optional[int] = None
@@ -207,7 +217,7 @@ class ProgramResponse(BaseModel):
     name: str
     description: Optional[str] = None
     type: str
-    validity: Optional[str] = None
+    validity: Optional[date] = None
     hours: int
     schedule: Optional[str] = DEFAULT_PROGRAM_SCHEDULE
     days: Optional[int] = None
@@ -301,6 +311,8 @@ class AccountCreate(BaseModel):
     full_name: str
     password: str
     user_type: AccountRole
+    sex: Optional[str] = None
+    position: Optional[str] = None
 
 
 class AccountUpdate(BaseModel):
@@ -308,6 +320,22 @@ class AccountUpdate(BaseModel):
     full_name: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    sex: Optional[str] = None
+    position: Optional[str] = None
+
+
+class ProgramTypeCreate(BaseModel):
+    name: str
+
+
+class ProgramTypeResponse(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class MessageCreate(BaseModel):

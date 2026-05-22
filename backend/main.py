@@ -5,6 +5,7 @@ import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from socketio import ASGIApp
 
 try:
@@ -32,9 +33,15 @@ DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:3004",
+    "http://localhost:3005",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
     "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
+    "http://127.0.0.1:3004",
+    "http://127.0.0.1:3005",
 ]
 
 
@@ -49,6 +56,7 @@ def get_cors_origins():
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,3 +81,9 @@ async def root():
 @fastapi_app.get("/health")
 async def health_check():
     return {"status": "healthy", "version": "1.0.0"}
+
+
+@fastapi_app.get("/tesda-icon.png")
+async def tesda_icon():
+    icon_path = Path(__file__).resolve().parent / "tesda_icon.png"
+    return FileResponse(icon_path)

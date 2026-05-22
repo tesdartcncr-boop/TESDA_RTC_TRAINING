@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Bell, Mail, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { getSocket, registerUser } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
@@ -13,7 +14,7 @@ export default function MessageNotifications() {
   const [loading, setLoading] = useState(false)
 
   // Load unread count
-  const loadUnreadCount = async () => {
+  const loadUnreadCount = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/messages/unread-count`, {
         headers: { Authorization: `Bearer ${getToken()}` },
@@ -24,10 +25,10 @@ export default function MessageNotifications() {
       console.error('Failed to load unread count:', error)
       setUnreadCount(0)
     }
-  }
+  }, [])
 
   // Load recent messages
-  const loadRecentMessages = async () => {
+  const loadRecentMessages = useCallback(async () => {
     setLoading(true)
     try {
       const response = await fetch(`${API_BASE}/api/messages?limit=5&status=unread`, {
@@ -45,7 +46,7 @@ export default function MessageNotifications() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   // Handle message click
   const handleMessageClick = async (messageId) => {
@@ -65,10 +66,62 @@ export default function MessageNotifications() {
       setRecentMessages(prev => prev.filter(msg => msg.id !== messageId))
       
       // Navigate to inbox
-      window.location.href = '/inbox'
+      globalThis.location.href = '/inbox'
     } catch (error) {
       console.error('Failed to mark message as read:', error)
     }
+  }
+
+  let messageList
+  if (loading) {
+    messageList = (
+      <div className="p-4 text-center text-slate-500">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600 mx-auto mb-2" />
+        Loading...
+      </div>
+    )
+  } else if (recentMessages.length === 0) {
+    messageList = (
+      <div className="p-4 text-center text-slate-500">
+        <Mail className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+        <p className="text-sm">No new messages</p>
+      </div>
+    )
+  } else {
+    messageList = (
+      <div className="divide-y divide-slate-100">
+        {recentMessages.map((message) => (
+          <button
+            key={message.id}
+            type="button"
+            onClick={() => handleMessageClick(message.id)}
+            className="w-full p-4 text-left hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex items-start gap-3">
+              <div className="h-8 w-8 rounded-full bg-cyan-100 flex items-center justify-center flex-shrink-0">
+                <Mail className="h-4 w-4 text-cyan-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium text-slate-900 truncate">
+                    {message.sender_name}
+                  </p>
+                  <span className="text-xs text-slate-500">
+                    {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-900 truncate mb-1">
+                  {message.subject}
+                </p>
+                <p className="text-xs text-slate-600 line-clamp-2">
+                  {message.content}
+                </p>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    )
   }
 
   // Toggle dropdown
@@ -79,12 +132,40 @@ export default function MessageNotifications() {
     setShowDropdown(!showDropdown)
   }
 
-  // Auto-refresh unread count every 30 seconds
+  // Auto-refresh unread count periodically as a fallback to websocket updates
   useEffect(() => {
     loadUnreadCount()
-    const interval = setInterval(loadUnreadCount, 30000)
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        loadUnreadCount()
+      }
+    }, 60000)
     return () => clearInterval(interval)
-  }, [])
+  }, [loadUnreadCount])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    const socket = getSocket()
+    if (!socket) return undefined
+
+    registerUser(user.user_id || user.id)
+
+    const refreshMessages = () => {
+      loadUnreadCount()
+      if (showDropdown) {
+        loadRecentMessages()
+      }
+    }
+
+    socket.on('new_message', refreshMessages)
+    socket.on('message_update', refreshMessages)
+
+    return () => {
+      socket.off('new_message', refreshMessages)
+      socket.off('message_update', refreshMessages)
+    }
+  }, [loadRecentMessages, loadUnreadCount, showDropdown, user?.id, user?.user_id])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -128,49 +209,7 @@ export default function MessageNotifications() {
           </div>
 
           <div className="max-h-96 overflow-y-auto">
-            {loading ? (
-              <div className="p-4 text-center text-slate-500">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600 mx-auto mb-2" />
-                Loading...
-              </div>
-            ) : recentMessages.length === 0 ? (
-              <div className="p-4 text-center text-slate-500">
-                <Mail className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                <p className="text-sm">No new messages</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {recentMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    onClick={() => handleMessageClick(message.id)}
-                    className="p-4 hover:bg-slate-50 cursor-pointer transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="h-8 w-8 rounded-full bg-cyan-100 flex items-center justify-center flex-shrink-0">
-                        <Mail className="h-4 w-4 text-cyan-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm font-medium text-slate-900 truncate">
-                            {message.sender_name}
-                          </p>
-                          <span className="text-xs text-slate-500">
-                            {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-900 truncate mb-1">
-                          {message.subject}
-                        </p>
-                        <p className="text-xs text-slate-600 line-clamp-2">
-                          {message.content}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {messageList}
           </div>
 
           <div className="p-3 border-t border-slate-200">

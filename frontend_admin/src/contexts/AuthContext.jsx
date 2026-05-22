@@ -3,6 +3,7 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 import { jwtDecode } from 'jwt-decode'
 import { normalizeApiError } from '../utils/apiErrors'
+import { disconnectSocket } from '../utils/socket'
 
 const AuthContext = createContext()
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
@@ -40,6 +41,7 @@ const getStoredToken = () => {
 }
 
 const clearStoredToken = () => {
+  disconnectSocket()
   localStorage.removeItem(PERSISTENT_TOKEN_KEY)
   sessionStorage.removeItem(SESSION_TOKEN_KEY)
   // Clear any cookies as backup
@@ -127,8 +129,8 @@ export const AuthProvider = ({ children }) => {
       const { access_token: accessToken, user: nextUser } = response.data
 
       if (nextUser?.user_type !== 'admin') {
-        toast.error('Only admin accounts can log in here. Supervisors should use the supervisor portal.')
-        return { success: false, error: 'Only admin accounts can log in here. Supervisors should use the supervisor portal.' }
+        toast.error('Only admin accounts can log in here. Center Chiefs should use the Center Chief portal.')
+        return { success: false, error: 'Only admin accounts can log in here. Center Chiefs should use the Center Chief portal.' }
       }
 
       storeToken(accessToken, rememberMe)

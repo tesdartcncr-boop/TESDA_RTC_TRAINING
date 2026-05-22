@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Briefcase, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
+import { getSocket } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const PROGRAM_TYPES = [
@@ -13,8 +14,39 @@ const PROGRAM_TYPES = [
   'Microcredential',
 ]
 
+const buildDefaultProgramTypes = () => PROGRAM_TYPES.map((name, index) => ({ id: index + 1, name }))
+
+const normalizeProgramTypes = (data) => {
+  if (!Array.isArray(data)) {
+    return []
+  }
+
+  return data
+    .map((programType, index) => {
+      if (typeof programType === 'string') {
+        return { id: index + 1, name: programType }
+      }
+
+      if (!programType || typeof programType !== 'object') {
+        return null
+      }
+
+      if (!programType.name) {
+        return null
+      }
+
+      return {
+        ...programType,
+        id: programType.id ?? index + 1,
+        name: programType.name,
+      }
+    })
+    .filter(Boolean)
+}
+
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const formatDateOnly = (value) => (value ? String(value).split('T')[0] : 'Not set')
 
 export default function Programs() {
   const location = useLocation()
@@ -22,6 +54,7 @@ export default function Programs() {
   const [programs, setPrograms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
+  const [programTypes, setProgramTypes] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingProgram, setEditingProgram] = useState(null)
 
@@ -37,7 +70,7 @@ export default function Programs() {
   })
   const editForm = useForm()
 
-  const loadPrograms = async () => {
+  const loadPrograms = useCallback(async () => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('programs_list', { search: searchTerm || null })
@@ -61,11 +94,52 @@ export default function Programs() {
     } finally {
       setLoading(false)
     }
+  }, [searchTerm])
+
+  const loadProgramTypes = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/programs/types`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || 'Failed to load program types')
+      }
+
+      const data = await response.json()
+      const nextTypes = normalizeProgramTypes(data)
+      setProgramTypes(nextTypes.length > 0 ? nextTypes : buildDefaultProgramTypes())
+    } catch (error) {
+      console.error(error)
+      setProgramTypes((currentTypes) => (currentTypes.length > 0 ? currentTypes : buildDefaultProgramTypes()))
+    }
   }
 
   useEffect(() => {
     loadPrograms()
-  }, [searchTerm])
+  }, [loadPrograms])
+
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return undefined
+
+    const handleProgramUpdate = () => {
+      cacheManager.clearPattern('programs_list:')
+      cacheManager.clearPattern('programs:')
+      loadPrograms()
+    }
+
+    socket.on('program_update', handleProgramUpdate)
+
+    return () => {
+      socket.off('program_update', handleProgramUpdate)
+    }
+  }, [loadPrograms])
+
+  useEffect(() => {
+    loadProgramTypes()
+  }, [])
 
   useEffect(() => {
     if (location.state?.openCreateModal) {
@@ -83,6 +157,8 @@ export default function Programs() {
         .some((value) => value.toLowerCase().includes(query))
     )
   }, [programs, searchTerm])
+
+  const availableProgramTypes = programTypes.length > 0 ? programTypes : buildDefaultProgramTypes()
 
   const handleCreate = async (values) => {
     try {
@@ -208,7 +284,7 @@ export default function Programs() {
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search program name, type, or validity..."
+            placeholder="Search program name, type, or validity date..."
             className={`${fieldClassName} pl-12`}
           />
         </div>
@@ -230,9 +306,9 @@ export default function Programs() {
                 </div>
               </div>
               <div className="mt-5 space-y-2 text-sm text-slate-600">
-                <p><span className="font-semibold text-slate-800">Recognition Number:</span> {program.recognition_number || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">Validity:</span> {program.validity || 'Not set'}</p>
-                <p><span className="font-semibold text-slate-800">Hours:</span> {program.hours || 0}</p>
+                <p><span className="font-semibold text-slate-800">COPR/ Recognition Number:</span> {program.recognition_number || 'Not set'}</p>
+                <p><span className="font-semibold text-slate-800">Validity Date:</span> {formatDateOnly(program.validity)}</p>
+                <p><span className="font-semibold text-slate-800">Nominal Duration:</span> {program.hours || 0}</p>
                 <p><span className="font-semibold text-slate-800">Weekday Days:</span> {program.days || 0}</p>
                 <p>{program.description || 'No description provided.'}</p>
               </div>
@@ -265,21 +341,21 @@ export default function Programs() {
               <input id="program_name" {...createForm.register('name', { required: 'Program name is required' })} placeholder="e.g. Welding Basics" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
-              <input id="program_recognition_number" {...createForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="program_recognition_number" className="block text-sm font-semibold text-slate-700">COPR/ Recognition Number</label>
+              <input id="program_recognition_number" {...createForm.register('recognition_number')} placeholder="Enter COPR/ recognition number" className={`${fieldClassName} mt-2`} />
             </div>
             <div>
               <label htmlFor="program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>
               <select id="program_type" {...createForm.register('type')} className={`${fieldClassName} mt-2`}>
-                {PROGRAM_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                {availableProgramTypes.map((type) => <option key={type.id} value={type.name}>{type.name}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="program_validity" className="block text-sm font-semibold text-slate-700">Validity</label>
-              <input id="program_validity" {...createForm.register('validity')} placeholder="e.g. 3 years" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="program_validity" className="block text-sm font-semibold text-slate-700">Validity Date</label>
+              <input id="program_validity" type="date" {...createForm.register('validity')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="program_hours" className="block text-sm font-semibold text-slate-700">Number of Hours</label>
+              <label htmlFor="program_hours" className="block text-sm font-semibold text-slate-700">Nominal Duration</label>
               <input id="program_hours" type="number" {...createForm.register('hours')} placeholder="e.g. 120" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
@@ -302,21 +378,21 @@ export default function Programs() {
               <input id="edit_program_name" {...editForm.register('name', { required: true })} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="edit_program_recognition_number" className="block text-sm font-semibold text-slate-700">Recognition Number</label>
-              <input id="edit_program_recognition_number" {...editForm.register('recognition_number')} placeholder="Enter recognition number" className={`${fieldClassName} mt-2`} />
+              <label htmlFor="edit_program_recognition_number" className="block text-sm font-semibold text-slate-700">COPR/ Recognition Number</label>
+              <input id="edit_program_recognition_number" {...editForm.register('recognition_number')} placeholder="Enter COPR/ recognition number" className={`${fieldClassName} mt-2`} />
             </div>
             <div>
               <label htmlFor="edit_program_type" className="block text-sm font-semibold text-slate-700">Program Type</label>
               <select id="edit_program_type" {...editForm.register('type')} className={`${fieldClassName} mt-2`}>
-                {PROGRAM_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                {availableProgramTypes.map((type) => <option key={type.id} value={type.name}>{type.name}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="edit_program_validity" className="block text-sm font-semibold text-slate-700">Validity</label>
-              <input id="edit_program_validity" {...editForm.register('validity')} className={`${fieldClassName} mt-2`} />
+              <label htmlFor="edit_program_validity" className="block text-sm font-semibold text-slate-700">Validity Date</label>
+              <input id="edit_program_validity" type="date" {...editForm.register('validity')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">
-              <label htmlFor="edit_program_hours" className="block text-sm font-semibold text-slate-700">Number of Hours</label>
+              <label htmlFor="edit_program_hours" className="block text-sm font-semibold text-slate-700">Nominal Duration</label>
               <input id="edit_program_hours" type="number" {...editForm.register('hours')} className={`${fieldClassName} mt-2`} />
             </div>
             <div className="md:col-span-2">

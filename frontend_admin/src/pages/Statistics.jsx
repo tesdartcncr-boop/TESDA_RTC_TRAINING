@@ -6,6 +6,11 @@ import { cacheManager } from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
+const PROGRAM_TYPE_COLORS = {
+  'Institution-Based': 'bg-sky-500',
+  'Community-Based': 'bg-emerald-500',
+  Microcredential: 'bg-orange-500',
+}
 
 function StatBar({ label, value, total, color }) {
   const minWidth = value > 0 ? 8 : 0
@@ -114,6 +119,7 @@ StatBar.propTypes = {
   const totalTeachingLoads = overviewStats
     ? Object.values(overviewStats.teaching_loads || {}).reduce((sum, value) => sum + value, 0)
     : 0
+  const programTypeEntries = Object.entries(overviewStats?.program_types || {})
 
   const handleYearChange = (year) => {
     setSelectedYear(year)
@@ -135,7 +141,7 @@ StatBar.propTypes = {
       <div className="grid gap-4 md:grid-cols-4">
         {[
           { label: 'Admin Accounts', value: dashboardStats?.total_admin_accounts ?? 0, icon: Users },
-          { label: 'Supervisor Accounts', value: dashboardStats?.total_supervisor_accounts ?? 0, icon: Users },
+          { label: 'Center Chief Accounts', value: dashboardStats?.total_supervisor_accounts ?? 0, icon: Users },
           { label: 'Pending Loads', value: dashboardStats?.pending_loads ?? 0, icon: Clock3 },
           { label: 'Approved Loads', value: dashboardStats?.approved_loads ?? 0, icon: CheckCircle2 },
         ].map((card) => (
@@ -156,9 +162,11 @@ StatBar.propTypes = {
             <h2 className="text-xl font-bold text-slate-900">Program Types</h2>
           </div>
           <div className="space-y-4">
-            <StatBar label="Institution-Based" value={overviewStats?.program_types?.institution_based || 0} total={totalProgramTypes} color="bg-sky-500" />
-            <StatBar label="Community-Based" value={overviewStats?.program_types?.community_based || 0} total={totalProgramTypes} color="bg-emerald-500" />
-            <StatBar label="Microcredential" value={overviewStats?.program_types?.microcredential || 0} total={totalProgramTypes} color="bg-orange-500" />
+            {programTypeEntries.length === 0 ? (
+              <p className="text-sm text-slate-500">No program types found.</p>
+            ) : programTypeEntries.map(([label, value]) => (
+              <StatBar key={label} label={label} value={value} total={totalProgramTypes} color={PROGRAM_TYPE_COLORS[label] || 'bg-sky-500'} />
+            ))}
           </div>
         </div>
 
