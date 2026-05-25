@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Mail, Pencil, Save, User, X } from 'lucide-react'
+import { Mail, Pencil, Save, ShieldCheck, User, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
@@ -70,6 +70,12 @@ export default function Profile() {
     tmcStatus = isTmcExpired ? 'Expired' : 'Active'
   }
 
+  const profileSummary = useMemo(() => ({
+    activeQualifications: qualificationGroups.active.length,
+    expiredQualifications: qualificationGroups.expired.length,
+    qualificationTotal: qualifications.length,
+  }), [qualificationGroups.active.length, qualificationGroups.expired.length, qualifications.length])
+
   const renderProfileField = (field) => {
     if (!isEditing || field === 'position') {
       return <p className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">{user?.[field] || 'Not set'}</p>
@@ -108,35 +114,62 @@ export default function Profile() {
           <div className="h-1.5 w-full animate-pulse bg-gradient-to-r from-cyan-500 via-blue-500 to-sky-500" />
         </div>
       )}
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <section className="rounded-[2.25rem] border border-slate-200 bg-gradient-to-br from-slate-950 via-cyan-900 to-blue-700 p-6 text-white shadow-[0_28px_80px_rgba(15,23,42,0.22)]">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-start gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-cyan-100 text-cyan-700">
+            <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10 text-white ring-1 ring-white/20 backdrop-blur">
               <User className="h-8 w-8" />
             </div>
             <div>
-              <h1 className="text-3xl font-black text-slate-900">{user?.trainer_name || user?.full_name || user?.username}</h1>
-              <p className="mt-1 text-sm text-slate-500">@{user?.username}</p>
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-                <Mail className="h-4 w-4" />
-                <span>{user?.email}</span>
+              <p className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-100">Trainer Profile</p>
+              <h1 className="mt-2 text-3xl font-black leading-tight text-white">{user?.trainer_name || user?.full_name || user?.username}</h1>
+              <p className="mt-1 text-sm text-cyan-50/90">@{user?.username}</p>
+              <div className="mt-4 flex flex-wrap gap-2 text-sm text-cyan-50/90">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 ring-1 ring-white/10">
+                  <Mail className="h-4 w-4" />
+                  {user?.email}
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 ring-1 ring-white/10">
+                  <ShieldCheck className="h-4 w-4" />
+                  {user?.position || 'Trainer'}
+                </span>
               </div>
             </div>
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[26rem]">
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">TM Status</p>
+              <p className="mt-2 text-xl font-black text-white">{tmcStatus}</p>
+              <p className="mt-1 text-xs text-cyan-50/80">{user?.tm_number || 'No TMC number set'}</p>
+            </div>
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">Qualifications</p>
+              <p className="mt-2 text-xl font-black text-white">{profileSummary.qualificationTotal}</p>
+              <p className="mt-1 text-xs text-cyan-50/80">{profileSummary.activeQualifications} active / {profileSummary.expiredQualifications} expired</p>
+            </div>
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-100">Account</p>
+              <p className="mt-2 text-xl font-black text-white">{user?.trainer_type || 'Trainer'}</p>
+              <p className="mt-1 text-xs text-cyan-50/80">{user?.sex || 'No sex set'}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-3">
           {isEditing ? (
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setIsEditing(false)} className="inline-flex items-center rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">
+            <>
+              <button type="button" onClick={() => setIsEditing(false)} className="inline-flex items-center rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15">
                 <X className="mr-2 h-4 w-4" />
                 Cancel
               </button>
-              <button type="button" onClick={form.handleSubmit(handleSave)} disabled={isLoading} className="inline-flex items-center rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="button" onClick={form.handleSubmit(handleSave)} disabled={isLoading} className="inline-flex items-center rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 shadow-lg disabled:cursor-not-allowed disabled:opacity-60">
                 <Save className="mr-2 h-4 w-4" />
                 {isLoading ? 'Saving...' : 'Save'}
               </button>
-            </div>
+            </>
           ) : (
-            <button type="button" onClick={() => setIsEditing(true)} className="inline-flex items-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <button type="button" onClick={() => setIsEditing(true)} className="inline-flex items-center rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 shadow-lg hover:bg-cyan-50">
               <Pencil className="mr-2 h-4 w-4" />
               Edit Profile
             </button>
@@ -145,9 +178,10 @@ export default function Profile() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm lg:max-h-[32rem] lg:overflow-y-auto lg:pr-2">
           <h2 className="text-xl font-bold text-slate-900">Profile Details</h2>
-          <div className="mt-5 grid gap-4">
+          <p className="mt-2 text-sm text-slate-500">Keep your trainer information up to date for teaching load approvals and reports.</p>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
             {[
               ['Trainer Name', 'trainer_name'],
               ['Sex', 'sex'],
@@ -158,7 +192,7 @@ export default function Profile() {
               ['Trainer Type', 'trainer_type'],
               ['Position', 'position'],
             ].map(([label, field]) => (
-              <div key={field}>
+              <div key={field} className={field === 'trainer_name' ? 'md:col-span-2' : ''}>
                 <label className="block text-sm font-semibold text-slate-700">{label}</label>
                 {renderProfileField(field)}
               </div>
@@ -169,6 +203,7 @@ export default function Profile() {
         <div className="space-y-6">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-bold text-slate-900">Qualifications</h2>
+            <p className="mt-2 text-sm text-slate-500">Active and expired qualifications are grouped so you can scan them quickly.</p>
             <div className="mt-4 space-y-4">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-600">Active</p>
@@ -199,6 +234,7 @@ export default function Profile() {
 
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-xl font-bold text-slate-900">Account Info</h2>
+            <p className="mt-2 text-sm text-slate-500">Your account and TMC details used by the portal.</p>
             <div className="mt-4 grid gap-3 text-sm text-slate-700">
               <p><span className="font-semibold">Username:</span> {user?.username}</p>
               <p><span className="font-semibold">Email:</span> {user?.email}</p>

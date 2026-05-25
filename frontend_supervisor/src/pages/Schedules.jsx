@@ -498,7 +498,7 @@ export default function Schedules() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.3fr)]">
-        <div className="space-y-4">{assignmentsPanel}</div>
+        <div className="max-h-[40rem] space-y-4 overflow-y-auto pr-1">{assignmentsPanel}</div>
 
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm xl:sticky xl:top-6 xl:self-start">
           {detailsPanel}

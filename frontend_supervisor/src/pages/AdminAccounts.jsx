@@ -202,7 +202,8 @@ export default function AdminAccounts() {
       {loading ? (
         <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading accounts...</div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-2">
+        <div className="max-h-[34rem] overflow-y-auto pr-1">
+          <div className="grid gap-5 xl:grid-cols-2">
             {accounts.map((account) => (
               <div key={account.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start gap-4">
@@ -243,11 +244,12 @@ export default function AdminAccounts() {
             </div>
           ))}
 
-            {!accounts.length && (
-              <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
-                No accounts found.
-              </div>
-            )}
+              {!accounts.length && (
+                <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
+                  No accounts found.
+                </div>
+              )}
+            </div>
         </div>
       )}
 

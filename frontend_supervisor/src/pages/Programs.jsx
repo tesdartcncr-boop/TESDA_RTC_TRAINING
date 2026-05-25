@@ -70,18 +70,16 @@ export default function Programs() {
   })
   const editForm = useForm()
 
-  const loadPrograms = useCallback(async () => {
+  const loadPrograms = useCallback(async (forceRefresh = false) => {
     setLoading(true)
     try {
-      const cacheKey = cacheManager.generateKey('programs_list', { search: searchTerm || null })
-      const cached = cacheManager.get(cacheKey)
+      const cacheKey = cacheManager.generateKey('programs_list', { version: 'local-search-v1' })
+      const cached = forceRefresh ? null : cacheManager.get(cacheKey)
       if (cached !== null) {
         setPrograms(cached)
-        setLoading(false)
-        return
       }
 
-      const response = await fetch(`${API_BASE}/api/programs/?skip=0&limit=100&search=${encodeURIComponent(searchTerm)}`, {
+      const response = await fetch(`${API_BASE}/api/programs/?skip=0&limit=100`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
@@ -94,7 +92,7 @@ export default function Programs() {
     } finally {
       setLoading(false)
     }
-  }, [searchTerm])
+  }, [])
 
   const loadProgramTypes = async () => {
     try {
@@ -117,7 +115,7 @@ export default function Programs() {
   }
 
   useEffect(() => {
-    loadPrograms()
+    loadPrograms(true)
   }, [loadPrograms])
 
   useEffect(() => {
@@ -127,7 +125,7 @@ export default function Programs() {
     const handleProgramUpdate = () => {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
-      loadPrograms()
+      loadPrograms(true)
     }
 
     socket.on('program_update', handleProgramUpdate)
@@ -149,13 +147,17 @@ export default function Programs() {
   }, [location, navigate])
 
   const filteredPrograms = useMemo(() => {
-    if (!searchTerm.trim()) return programs
-    const query = searchTerm.toLowerCase()
-    return programs.filter((program) =>
-      [program.name, program.description, program.validity, program.type]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(query))
-    )
+    const query = searchTerm.trim().toLowerCase()
+    let nextPrograms = programs
+
+    if (query) {
+      nextPrograms = programs.filter((program) => {
+        const fields = [program.name, program.description, program.validity, program.type, program.recognition_number]
+        return fields.filter(Boolean).some((value) => String(value).toLowerCase().includes(query))
+      })
+    }
+
+    return [...nextPrograms].sort((left, right) => (left.name || '').localeCompare(right.name || ''))
   }, [programs, searchTerm])
 
   const availableProgramTypes = programTypes.length > 0 ? programTypes : buildDefaultProgramTypes()
@@ -189,7 +191,7 @@ export default function Programs() {
       cacheManager.clearPattern('stats_')
       createForm.reset()
       setShowCreateModal(false)
-      loadPrograms()
+      loadPrograms(true)
     } catch (error) {
       toast.error(error.message)
     }
@@ -233,7 +235,7 @@ export default function Programs() {
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
       setEditingProgram(null)
-      loadPrograms()
+      loadPrograms(true)
     } catch (error) {
       toast.error(error.message)
     }
@@ -254,7 +256,7 @@ export default function Programs() {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
-      loadPrograms()
+      loadPrograms(true)
     } catch (error) {
       toast.error(error.message)
     }
@@ -293,7 +295,8 @@ export default function Programs() {
       {loading ? (
         <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading programs...</div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-3">
+        <div className="max-h-[36rem] overflow-y-auto pr-1">
+          <div className="grid gap-5 xl:grid-cols-3">
           {filteredPrograms.map((program) => (
             <div key={program.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start justify-between gap-4">
@@ -325,11 +328,12 @@ export default function Programs() {
             </div>
           ))}
 
-          {!filteredPrograms.length && (
-            <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-3">
-              No programs found.
-            </div>
-          )}
+            {!filteredPrograms.length && (
+              <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-3">
+                No programs found.
+              </div>
+            )}
+          </div>
         </div>
       )}
 

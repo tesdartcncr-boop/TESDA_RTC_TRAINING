@@ -15,6 +15,7 @@ ADMIN_ACCESS_DENIED = "Access denied. Admin access required."
 PROGRAM_NOT_FOUND = "Program not found"
 PROGRAMS_CACHE_PATTERN = "programs:*"
 SCHEDULES_CACHE_PATTERN = "schedules:*"
+TEACHING_LOADS_SUMMARY_CACHE_PATTERN = "teaching_loads_summary:*"
 DEFAULT_SCHEDULE_LABEL = "8 Hours/Day"
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 FILTER_TRUE = "eq.true"
@@ -154,7 +155,7 @@ async def create_program(program_data: ProgramCreate, current_user: CurrentUser)
         result = insert_row("programs", payload)
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
-        cache_manager.clear_pattern("teaching_loads_summary:*")
+        cache_manager.clear_pattern(TEACHING_LOADS_SUMMARY_CACHE_PATTERN)
         await broadcast_program_update(
             {
                 "event_type": "program_created",
@@ -207,7 +208,7 @@ async def update_program(program_id: int, program_data: ProgramUpdate, current_u
         updated_program = update_row("programs", update_data, filters={"id": f"eq.{program_id}"})
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
-        cache_manager.clear_pattern("teaching_loads_summary:*")
+        cache_manager.clear_pattern(TEACHING_LOADS_SUMMARY_CACHE_PATTERN)
         await broadcast_program_update(
             {
                 "event_type": "program_updated",
@@ -234,9 +235,23 @@ async def delete_program(program_id: int, current_user: CurrentUser):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=PROGRAM_NOT_FOUND)
 
     try:
+        # Capture every assignment affected by this program so we can delete and notify them all.
+        affected_assignments = select_rows(
+            "trainer_programs",
+            filters={"program_id": f"eq.{program_id}"},
+            select="id,trainer_id,program_id,approval_status",
+        )
+        affected_trainer_ids = {row.get("trainer_id") for row in affected_assignments if row.get("trainer_id") is not None}
+
+        # Delete schedules and assignments for the program regardless of approval state.
         delete_rows("schedules", filters={"program_id": f"eq.{program_id}"}, returning="minimal")
         delete_rows("trainer_programs", filters={"program_id": f"eq.{program_id}"}, returning="minimal")
+        # Also remove trainer qualifications tied to this program
+        delete_rows("trainer_qualifications", filters={"program_id": f"eq.{program_id}"}, returning="minimal")
+        # Finally remove the program record
         delete_rows("programs", filters={"id": f"eq.{program_id}"}, returning="minimal")
+
+        # Clear related caches
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
         cache_manager.clear_pattern(SCHEDULES_CACHE_PATTERN)
         cache_manager.clear_pattern("schedules_trainer_programs:*")
@@ -244,6 +259,9 @@ async def delete_program(program_id: int, current_user: CurrentUser):
         cache_manager.clear_pattern("trainer_programs:*")
         cache_manager.clear_pattern("trainer_schedule:*")
         cache_manager.clear_pattern("teaching_loads_summary:*")
+        cache_manager.clear_pattern("trainer_qualifications:*")
+
+        # Broadcast program deletion and schedule updates
         await broadcast_program_update({
             "event_type": "program_deleted",
             "program_id": program_id,
@@ -252,10 +270,30 @@ async def delete_program(program_id: int, current_user: CurrentUser):
                 "name": program.get("name"),
             },
         })
+
+        # Notify management and any affected trainers so their calendars refresh
         await broadcast_schedule_update({
             "event_type": "program_deleted",
             "program_id": program_id,
         })
+
+        if affected_trainer_ids:
+            trainers = select_rows(
+                "trainers",
+                filters={"id": f"in.({','.join(map(str, sorted(affected_trainer_ids)))})"},
+                select="id,user_id",
+            )
+            for t in trainers:
+                try:
+                    await broadcast_schedule_update({
+                        "event_type": "assignment_deleted",
+                        "program_id": program_id,
+                        "trainer_id": t.get("id"),
+                        "trainer_user_id": t.get("user_id"),
+                    })
+                except Exception:
+                    # don't fail the whole operation if a single emit fails
+                    pass
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -312,7 +350,7 @@ async def create_program_type(payload: ProgramTypeCreate, current_user: CurrentU
                 filters={"id": f"eq.{existing['id']}"},
             )
             cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
-            cache_manager.clear_pattern("teaching_loads_summary:*")
+            cache_manager.clear_pattern(TEACHING_LOADS_SUMMARY_CACHE_PATTERN)
             return updated or existing
 
         created = insert_row(
@@ -324,7 +362,7 @@ async def create_program_type(payload: ProgramTypeCreate, current_user: CurrentU
             },
         )
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
-        cache_manager.clear_pattern("teaching_loads_summary:*")
+        cache_manager.clear_pattern(TEACHING_LOADS_SUMMARY_CACHE_PATTERN)
         return created
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
@@ -342,7 +380,7 @@ async def deactivate_program_type(type_id: int, current_user: CurrentUser):
 
         update_row("program_types", {"is_active": False}, filters={"id": f"eq.{type_id}"})
         cache_manager.clear_pattern(PROGRAMS_CACHE_PATTERN)
-        cache_manager.clear_pattern("teaching_loads_summary:*")
+        cache_manager.clear_pattern(TEACHING_LOADS_SUMMARY_CACHE_PATTERN)
         return {"message": "Program type deactivated successfully"}
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)

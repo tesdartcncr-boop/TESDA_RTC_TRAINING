@@ -40,8 +40,6 @@ export default function Dashboard() {
       if (cached !== null) {
         setTeachingLoads(cached)
         setSelectedLoad(cached[0] || null)
-        setLoading(false)
-        return
       }
 
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
@@ -62,7 +60,7 @@ export default function Dashboard() {
   }, [user?.id, user?.trainer_id])
 
   useEffect(() => {
-    loadTeachingLoads()
+    loadTeachingLoads(true)
   }, [loadTeachingLoads])
 
   useEffect(() => {
@@ -124,7 +122,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (visibleLoads.length === 0) {
-      setSelectedLoad(null)
+      if (!selectedLoad && teachingLoads.length > 0) {
+        setSelectedLoad(teachingLoads[0])
+      }
       return
     }
 
@@ -146,48 +146,70 @@ export default function Dashboard() {
     )
   } else {
     loadsContent = (
-      <div className="grid gap-6 lg:grid-cols-[0.95fr_1.35fr]">
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {['all', 'in progress', 'completed'].map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setProgressFilter(option)}
-                className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] transition ${
-                  progressFilter === option
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {getProgressFilterLabel(option)}
-              </button>
-            ))}
+      <div className="grid gap-6 lg:grid-cols-[0.95fr_1.35fr] lg:items-start">
+        <div className="space-y-4">
+          <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500" htmlFor="trainer-progress-filter">
+              Filter teaching loads
+            </label>
+            <select
+              id="trainer-progress-filter"
+              value={progressFilter}
+              onChange={(event) => setProgressFilter(event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+            >
+              {['all', 'in progress', 'completed'].map((option) => (
+                <option key={option} value={option}>
+                  {getProgressFilterLabel(option)}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {visibleLoads.map((load) => (
-            <button
-              type="button"
-              key={load.id}
-              onClick={() => setSelectedLoad(load)}
-              className={`w-full rounded-[2rem] border p-5 text-left shadow-sm transition ${
-                selectedLoad?.id === load.id
-                  ? 'border-cyan-400 bg-cyan-50'
-                  : 'border-slate-200 bg-white hover:border-slate-300'
-              }`}
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500" htmlFor="trainer-load-select">
+              Select Teaching Load
+            </label>
+            <select
+              id="trainer-load-select"
+              value={selectedLoad?.id || ''}
+              onChange={(event) => {
+                const nextLoad = teachingLoads.find((load) => String(load.id) === event.target.value)
+                setSelectedLoad(nextLoad || null)
+              }}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-100"
             >
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{load.approval_status}</p>
-              <h3 className="mt-2 text-xl font-bold text-slate-900">{load.program_name}</h3>
-              <p className="mt-1 text-sm text-slate-600">{load.program_type}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">{load.hours_per_day} hrs/day</span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{load.program_days} days</span>
-              </div>
-            </button>
+              <option value="" disabled>
+                Choose a load
+              </option>
+              {teachingLoads.map((load) => (
+                <option key={load.id} value={load.id}>
+                  {load.program_name} - {load.approval_status} - {load.hours_per_day} hrs/day
+                </option>
               ))}
+            </select>
+
+            {visibleLoads.length === 0 && (
+              <div className="mt-4 rounded-[1.5rem] border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
+                No loads in this category.
+              </div>
+            )}
+
+            {visibleLoads.length > 0 && selectedLoad && (
+              <div className="mt-4 rounded-[1.5rem] border border-cyan-200 bg-cyan-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Current Selection</p>
+                <h3 className="mt-2 text-xl font-black text-slate-900">{selectedLoad.program_name}</h3>
+                <p className="mt-1 text-sm text-slate-600">{selectedLoad.program_type}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">{selectedLoad.hours_per_day} hrs/day</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{selectedLoad.program_days} days</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div>
+        <div className="lg:sticky lg:top-6">
           {selectedLoad && (
             <TrainerScheduleView program={selectedLoad} trainerId={user.trainer_id || user.id} />
           )}

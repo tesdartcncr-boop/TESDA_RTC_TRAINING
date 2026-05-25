@@ -80,13 +80,17 @@ export default function Layout() {
       </div>
 
       {/* Desktop Sidebar */}
-      <aside className={`hidden lg:flex lg:flex-col lg:border-r lg:border-white/10 lg:bg-slate-900/90 lg:backdrop-blur transition-all duration-300 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-80'}`}>
-        <div className="border-b border-white/10 px-4 py-4 lg:px-6 lg:py-6">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-200 lg:block">{sidebarCollapsed ? 'TESDA' : 'TESDA RTC - NCR'}</p>
-          <h1 className={`mt-2 font-bold text-white ${sidebarCollapsed ? 'text-lg' : 'text-2xl'}`}>
-            {sidebarCollapsed ? portalName.split(' ')[0] : portalName}
-          </h1>
-          {!sidebarCollapsed && <p className="mt-2 text-sm text-slate-300">Trainer and teaching load management</p>}
+      <aside className={`hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:flex-col lg:border-r lg:border-white/10 lg:bg-slate-900/90 lg:backdrop-blur transition-all duration-300 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-80'}`}>
+        <div className={`border-b border-white/10 px-4 py-4 lg:px-6 lg:py-6 ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
+          {sidebarCollapsed ? (
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 shadow-lg shadow-sky-900/25" />
+          ) : (
+            <>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-200">TESDA RTC - NCR</p>
+              <h1 className="mt-2 text-2xl font-bold leading-tight text-white">{portalName}</h1>
+              <p className="mt-2 text-sm text-slate-300">Trainer and teaching load management</p>
+            </>
+          )}
         </div>
         <nav className="flex-1 space-y-2 px-2 py-4 lg:px-4 lg:py-6">
           {navigation.map((item) => (
@@ -124,7 +128,7 @@ export default function Layout() {
       </aside>
 
       {/* Main Content Area */}
-      <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col transition-[margin-left] duration-300 ${sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-80'}`}>
         <header className="flex items-center justify-between border-b border-slate-200/70 bg-white/85 px-3 py-3 text-slate-900 backdrop-blur sm:px-4 sm:py-4">
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-slate-200 p-2 lg:hidden">

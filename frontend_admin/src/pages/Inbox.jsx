@@ -565,7 +565,7 @@ export default function Inbox() {
                       </div>
                     </div>
 
-                    <div className="mt-5 space-y-4">
+                    <div className="mt-5 max-h-[22rem] space-y-4 overflow-y-auto pr-1">
                       {threadMessages.map((message) => {
                         const isOwnMessage = String(message.sender_id) === currentUserId
                         return (

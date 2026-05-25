@@ -45,6 +45,30 @@ const isDateExpired = (value) => {
   return expiryDate.getTime() < Date.now()
 }
 
+const shouldRemoveAssignmentForEvent = (assignment, payload) => {
+  if (!assignment || !payload) return false
+
+  if (payload.event_type === 'program_deleted') {
+    return String(assignment.program_id) === String(payload.program_id)
+  }
+
+  if (payload.event_type === 'assignment_deleted') {
+    return String(assignment.trainer_id) === String(payload.trainer_id) && String(assignment.program_id) === String(payload.program_id)
+  }
+
+  return false
+}
+
+const updateAssignmentsForScheduleEvent = (currentAssignments, payload) => {
+  if (!Array.isArray(currentAssignments) || currentAssignments.length === 0) return currentAssignments
+
+  if (payload?.event_type === 'program_deleted' || payload?.event_type === 'assignment_deleted') {
+    return currentAssignments.filter((assignment) => !shouldRemoveAssignmentForEvent(assignment, payload))
+  }
+
+  return currentAssignments
+}
+
 export default function Schedules() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -71,19 +95,17 @@ export default function Schedules() {
     },
   })
 
-  const loadAssignments = async () => {
+  const loadAssignments = async (forceRefresh = false) => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('approval_queue', { status: statusFilter || 'all' })
-      const cached = cacheManager.get(cacheKey)
+      const cached = forceRefresh ? null : cacheManager.get(cacheKey)
       if (cached !== null) {
         setAssignments(cached)
         if (selectedAssignment) {
           const refreshed = cached.find((item) => item.id === selectedAssignment.id)
           setSelectedAssignment(refreshed || null)
         }
-        setLoading(false)
-        return
       }
 
       const query = statusFilter === 'all' ? '' : `?approval_status=${encodeURIComponent(statusFilter)}`
@@ -251,7 +273,7 @@ export default function Schedules() {
   }
 
   useEffect(() => {
-    loadAssignments()
+    loadAssignments(true)
   }, [statusFilter])
 
   useEffect(() => {
@@ -269,18 +291,24 @@ export default function Schedules() {
     registerUser(user.user_id || user.id)
 
     const handleScheduleUpdate = (payload) => {
-      if (!payload || !['assignment_approval_updated', 'assignment_created', 'assignment_deleted'].includes(payload.event_type)) return
+      if (!payload || !['assignment_approval_updated', 'assignment_created', 'assignment_deleted', 'program_deleted'].includes(payload.event_type)) return
 
       cacheManager.clearPattern('approval_queue:')
+      cacheManager.clearPattern('trainer_programs:')
+      cacheManager.clearPattern('schedules_trainer_programs:')
+      cacheManager.clearPattern('schedules_schedule:')
       setSelectedAssignment((current) => {
         if (!current) return null
-        if (String(current.trainer_id) === String(payload.trainer_id) && String(current.program_id) === String(payload.program_id)) {
+        const sameAssignment = String(current.trainer_id) === String(payload.trainer_id) && String(current.program_id) === String(payload.program_id)
+        const sameProgram = payload.event_type === 'program_deleted' && String(current.program_id) === String(payload.program_id)
+        if (sameAssignment || sameProgram) {
           setScheduleDays([])
-          return payload.event_type === 'assignment_deleted' ? null : current
+          return payload.event_type === 'assignment_deleted' || payload.event_type === 'program_deleted' ? null : current
         }
         return current
       })
-      loadAssignments()
+      setAssignments((current) => updateAssignmentsForScheduleEvent(current, payload))
+      loadAssignments(true)
     }
 
     socket.on('schedule_update', handleScheduleUpdate)
@@ -301,7 +329,10 @@ export default function Schedules() {
 
       cacheManager.clearPattern('approval_queue:')
       cacheManager.clearPattern('schedule_days:')
-      loadAssignments()
+      cacheManager.clearPattern('trainer_programs:')
+      cacheManager.clearPattern('schedules_trainer_programs:')
+      cacheManager.clearPattern('schedules_schedule:')
+      loadAssignments(true)
       setSelectedAssignment((current) => {
         if (!current || String(current.program_id) !== String(payload.program_id)) return current
         setScheduleDays([])
@@ -393,7 +424,7 @@ export default function Schedules() {
       })
       setEligiblePrograms([])
       setShowCreateModal(false)
-      loadAssignments()
+      loadAssignments(true)
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -608,7 +639,7 @@ export default function Schedules() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.3fr)]">
-        <div className="space-y-4">{assignmentsPanel}</div>
+        <div className="max-h-[40rem] space-y-4 overflow-y-auto pr-1">{assignmentsPanel}</div>
 
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm xl:sticky xl:top-6 xl:self-start">
           {detailsPanel}

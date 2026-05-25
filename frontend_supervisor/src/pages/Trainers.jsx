@@ -549,7 +549,8 @@ export default function Trainers() {
       {loading ? (
         <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading trainers...</div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-2">
+        <div className="max-h-[36rem] overflow-y-auto pr-1">
+          <div className="grid gap-5 xl:grid-cols-2">
           {filteredTrainers.map((trainer) => (
             <div key={trainer.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start justify-between gap-4">
@@ -586,11 +587,12 @@ export default function Trainers() {
             </div>
           ))}
 
-          {!filteredTrainers.length && (
-            <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
-              No trainers found.
-            </div>
-          )}
+            {!filteredTrainers.length && (
+              <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500 xl:col-span-2">
+                No trainers found.
+              </div>
+            )}
+          </div>
         </div>
       )}
 
