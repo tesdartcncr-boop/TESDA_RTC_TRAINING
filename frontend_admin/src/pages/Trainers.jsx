@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Mail, Pencil, Plus, Search, Trash2, User } from 'lucide-react'
+import { Eye, EyeOff, Mail, Pencil, Plus, Search, Trash2, User } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
@@ -125,6 +125,7 @@ function QualificationSelector({ programs, selectedQualifications, setSelectedQu
 }
 
 function TrainerFormFields({ form, isEdit }) {
+  const [showPassword, setShowPassword] = useState(false)
   const mode = isEdit ? 'edit' : 'create'
   const fieldClass = `${inputClassName} mt-2`
   const requiredIfCreate = (message) => (isEdit ? {} : { required: message })
@@ -160,7 +161,22 @@ function TrainerFormFields({ form, isEdit }) {
       {!isEdit && (
         <div>
           <label htmlFor="create_password" className="block text-sm font-semibold text-slate-700">Password</label>
-          <input id="create_password" type="password" {...form.register('password', requiredIfCreate('Password is required'))} placeholder="Min 8 characters" className={fieldClass} />
+          <div className="relative mt-2">
+            <input
+              id="create_password"
+              type={showPassword ? 'text' : 'password'}
+              {...form.register('password', requiredIfCreate('Password is required'))}
+              placeholder="Min 8 characters"
+              className={`${inputClassName} pr-11`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+            >
+              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
       )}
       <div>

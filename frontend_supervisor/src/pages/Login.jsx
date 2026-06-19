@@ -160,7 +160,7 @@ export default function Login() {
             <p className="text-sm font-bold uppercase tracking-[0.28em] text-sky-100">TESDA RTC - NCR</p>
             <h1 className="mt-6 text-5xl font-black leading-tight">Supervisor Portal</h1>
             <p className="mt-5 max-w-lg text-lg text-sky-50/90">
-              Approve teaching loads, monitor approval queues, and review portal statistics.
+              Approve teaching load, monitor approval queues, and review portal statistics.
             </p>
             <div className="mt-10 grid gap-4">
               {[

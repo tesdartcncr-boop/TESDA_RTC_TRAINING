@@ -7,7 +7,7 @@ import MessageNotifications from './MessageNotifications'
 const adminNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Inbox', href: '/inbox', icon: Briefcase },
-  { name: 'Teaching Loads', href: '/teaching-loads', icon: Settings },
+  { name: 'Teaching Load', href: '/teaching-loads', icon: Settings },
   { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   { name: 'Trainer', href: '/trainers', icon: Users },
   { name: 'Program', href: '/programs', icon: Briefcase },
@@ -18,7 +18,7 @@ const adminNavigation = [
 
 const supervisorNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
-  { name: 'Teaching Loads', href: '/teaching-loads', icon: Briefcase },
+  { name: 'Teaching Load', href: '/teaching-loads', icon: Briefcase },
   { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   { name: 'Center Chief Accounts', href: '/admin-accounts?role=supervisor', icon: ShieldCheck },
   { name: 'Statistics', href: '/statistics', icon: BarChart3 },

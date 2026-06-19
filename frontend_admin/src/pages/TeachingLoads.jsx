@@ -59,7 +59,7 @@ export default function TeachingLoads() {
   const [programProgressFilter, setProgramProgressFilter] = useState('all')
   const [trainerProgressFilter, setTrainerProgressFilter] = useState('all')
 
-  // Load all teaching loads summary for badge counts
+  // Load all teaching load summary for badge counts
   const loadAllTeachingLoads = useCallback(async () => {
     try {
       const cacheKey = cacheManager.generateKey('all_teaching_loads_combined')
@@ -77,7 +77,7 @@ export default function TeachingLoads() {
       setAllTeachingLoads(allLoads)
       cacheManager.set(cacheKey, allLoads, 60000)
     } catch (error) {
-      console.error('Failed to load all teaching loads:', error)
+      console.error('Failed to load all teaching load:', error)
       setAllTeachingLoads([])
     }
   }, [])
@@ -136,7 +136,7 @@ export default function TeachingLoads() {
     }
   }, [])
 
-  // Load teaching loads for a program
+  // Load teaching load for a program
   const loadProgramTeachingLoads = useCallback(async (programId) => {
     try {
       const cacheKey = cacheManager.generateKey('program_teaching_loads', { program_id: programId })
@@ -154,12 +154,12 @@ export default function TeachingLoads() {
       setTeachingLoads(nextLoads)
       cacheManager.set(cacheKey, nextLoads, 300000)
     } catch (error) {
-      console.error('Failed to load program teaching loads:', error)
+      console.error('Failed to load program teaching load:', error)
       setTeachingLoads([])
     }
   }, [])
 
-  // Load teaching loads for a trainer
+  // Load teaching load for a trainer
   const loadTrainerTeachingLoads = useCallback(async (trainerId) => {
     try {
       const cacheKey = cacheManager.generateKey('trainer_teaching_loads', { trainer_id: trainerId })
@@ -177,7 +177,7 @@ export default function TeachingLoads() {
       setTeachingLoads(nextLoads)
       cacheManager.set(cacheKey, nextLoads, 300000)
     } catch (error) {
-      console.error('Failed to load trainer teaching loads:', error)
+      console.error('Failed to load trainer teaching load:', error)
       setTeachingLoads([])
     }
   }, [])
@@ -406,9 +406,9 @@ export default function TeachingLoads() {
       {/* Header */}
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-cyan-800 to-blue-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
         <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-100">TESDA RTC - NCR</p>
-        <h1 className="mt-4 text-4xl font-black">Teaching Loads</h1>
+        <h1 className="mt-4 text-4xl font-black">Teaching Load</h1>
         <p className="mt-3 max-w-2xl text-cyan-50/90">
-          View and manage approved teaching loads across all programs and trainers.
+          View and manage approved teaching load across all programs and trainers.
         </p>
       </section>
 
@@ -460,7 +460,7 @@ export default function TeachingLoads() {
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">
-            Loading teaching loads...
+            Loading teaching load...
           </div>
         ) : viewMode === 'programs' ? (
           <ProgramsView
@@ -625,11 +625,11 @@ function ProgramsView({
                 {teachingLoadsLoading ? (
                   <p className="text-sm text-slate-500">Loading assigned trainers...</p>
                 ) : teachingLoads.length === 0 ? (
-                  <p className="text-sm text-slate-500">No teaching loads assigned to this program.</p>
+                  <p className="text-sm text-slate-500">No teaching load assigned to this program.</p>
                 ) : (
                   <div className="space-y-2">
                     {teachingLoads.filter((load) => isSameId(load.program_id, program.id) && matchesProgressFilter(load)).length === 0 ? (
-                      <p className="text-sm text-slate-500">No teaching loads match this filter.</p>
+                      <p className="text-sm text-slate-500">No teaching load match this filter.</p>
                     ) : null}
                     {teachingLoads
                       .filter((load) => isSameId(load.program_id, program.id) && matchesProgressFilter(load))
@@ -774,11 +774,11 @@ function TrainersView({
                 {teachingLoadsLoading ? (
                   <p className="text-sm text-slate-500">Loading assigned programs...</p>
                 ) : teachingLoads.length === 0 ? (
-                  <p className="text-sm text-slate-500">No teaching loads assigned to this trainer.</p>
+                  <p className="text-sm text-slate-500">No teaching load assigned to this trainer.</p>
                 ) : (
                   <div className="space-y-2">
                     {teachingLoads.filter((load) => isSameId(load.trainer_id, trainer.id) && matchesProgressFilter(load)).length === 0 ? (
-                      <p className="text-sm text-slate-500">No teaching loads match this filter.</p>
+                      <p className="text-sm text-slate-500">No teaching load match this filter.</p>
                     ) : null}
                     {teachingLoads
                       .filter((load) => isSameId(load.trainer_id, trainer.id) && matchesProgressFilter(load))

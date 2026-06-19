@@ -110,7 +110,7 @@ export default function Schedules() {
       }
     } catch (error) {
       console.error(error)
-      toast.error('Failed to load teaching loads')
+      toast.error('Failed to load teaching load')
     } finally {
       setLoading(false)
     }
@@ -385,9 +385,9 @@ export default function Schedules() {
   const calendarDays = selectedAssignment?.program_days || 0
   let assignmentsPanel
   if (loading) {
-    assignmentsPanel = <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center text-slate-500">Loading teaching loads...</div>
+    assignmentsPanel = <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center text-slate-500">Loading teaching load...</div>
   } else if (filteredAssignments.length === 0) {
-    assignmentsPanel = <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">No teaching loads found.</div>
+    assignmentsPanel = <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">No teaching load found.</div>
   } else {
     assignmentsPanel = filteredAssignments.map((assignment) => (
       <button
@@ -516,7 +516,7 @@ export default function Schedules() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-black text-slate-900">Teaching Loads</h1>
+          <h1 className="text-3xl font-black text-slate-900">Teaching Load</h1>
           <p className="mt-2 text-sm text-slate-600">Assign qualified trainers, generate weekday calendars, and approve the load workflow.</p>
         </div>
         {user?.user_type === 'admin' && (

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Mail, Reply, Send, User } from 'lucide-react'
+import { AlertCircle, Mail, Reply, Send, Trash2, User } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
@@ -329,6 +329,38 @@ export default function Messages() {
     }
   }
 
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm('Are you sure you want to delete this message conversation? This action only hides it for you unless the other party has also deleted it.')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/messages/${messageId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete message')
+      }
+
+      // Remove from state
+      setSentMessages((prev) => prev.filter((msg) => msg.id !== messageId))
+      setReceivedMessages((prev) => prev.filter((msg) => msg.id !== messageId))
+      
+      // Clear selection
+      setSelectedMessageId(null)
+
+      // Clear cache
+      cacheManager.delete(cacheManager.generateKey('trainer_messages', { user_id: user.user_id || user.id }))
+    } catch (err) {
+      console.error('Failed to delete message:', err)
+      alert(err.message || 'Failed to delete message.')
+    }
+  }
+
   const formatDate = (dateString) => {
     if (!dateString) return ''
 
@@ -584,6 +616,14 @@ export default function Messages() {
                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs text-slate-600">
                           {selectedMessage.status || 'sent'}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMessage(selectedMessage.id)}
+                          className="rounded-xl p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+                          title="Delete message thread"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
 

@@ -160,11 +160,11 @@ export default function Login() {
             <p className="text-sm font-bold uppercase tracking-[0.28em] text-cyan-100">TESDA RTC - NCR</p>
             <h1 className="mt-6 text-5xl font-black leading-tight">Trainer Portal</h1>
             <p className="mt-5 max-w-lg text-lg text-cyan-50/90">
-              View approved teaching loads, track each training day, and keep your profile up to date.
+              View approved teaching load, track each training day, and keep your profile up to date.
             </p>
             <div className="mt-10 grid gap-4">
               {[
-                'Approved teaching loads only',
+                'Approved teaching load only',
                 'Color-coded daily attendance statuses',
                 'OTP-based forgot password through your email',
               ].map((item) => (

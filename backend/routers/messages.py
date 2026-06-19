@@ -12,7 +12,7 @@ from ..schemas import (
     MessageUpdate,
 )
 from ..socket_manager import emit_to_users
-from ..supabase_rest import SupabaseAPIError, get_public_error_message, insert_row, select_rows, select_one, update_row
+from ..supabase_rest import SupabaseAPIError, get_public_error_message, insert_row, select_rows, select_one, update_row, delete_rows
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -426,6 +426,34 @@ async def get_activity_updates(
         raise_supabase_http(exc)
 
 
+@router.delete("/updates/{update_id}")
+async def delete_activity_update(
+    update_id: int,
+    current_user: CurrentUser
+):
+    """Delete a specific activity update (Admin/Supervisor only)"""
+    if _normalize_user_type(current_user.get("user_type")) not in MANAGEMENT_USER_TYPES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE)
+    
+    try:
+        update = select_one("trainer_activity_updates", filters={"id": f"eq.{update_id}"})
+        if not update:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Activity update not found"
+            )
+        
+        delete_rows("trainer_activity_updates", filters={"id": f"eq.{update_id}"})
+        
+        # Broadcast socket event to trigger automatic updates reload across admin portals
+        from ..socket_manager import broadcast_activity_update
+        await broadcast_activity_update({"action_type": "activity_deleted", "id": update_id})
+        
+        return {"status": "deleted"}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
 @router.get("/{message_id}")
 async def get_message(
     message_id: int,
@@ -603,6 +631,7 @@ async def delete_message(
             )
         
         # Check if user has access
+        updated_msg = None
         if _normalize_user_type(current_user.get("user_type")) in MANAGEMENT_USER_TYPES:
             visible_user_ids = _load_visible_user_ids(current_user)
             if message["sender_id"] not in visible_user_ids and message["recipient_id"] not in visible_user_ids:
@@ -614,25 +643,25 @@ async def delete_message(
             # For management inbox, prefer deleting from recipient side when the
             # message is in any management recipient mailbox.
             if message["recipient_id"] in visible_user_ids:
-                update_row(
+                updated_msg = update_row(
                     "messages",
                     {"is_deleted_by_recipient": True},
                     filters={"id": f"eq.{message_id}"},
                 )
             else:
-                update_row(
+                updated_msg = update_row(
                     "messages",
                     {"is_deleted_by_sender": True},
                     filters={"id": f"eq.{message_id}"},
                 )
         elif message["sender_id"] == current_user["id"]:
-            update_row(
+            updated_msg = update_row(
                 "messages",
                 {"is_deleted_by_sender": True},
                 filters={"id": f"eq.{message_id}"},
             )
         elif message["recipient_id"] == current_user["id"]:
-            update_row(
+            updated_msg = update_row(
                 "messages",
                 {"is_deleted_by_recipient": True},
                 filters={"id": f"eq.{message_id}"},
@@ -642,6 +671,18 @@ async def delete_message(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ACCESS_DENIED_MESSAGE
             )
+
+        # Check if both sender and recipient deleted it
+        is_deleted_by_sender = False
+        is_deleted_by_recipient = False
+        if updated_msg:
+            is_deleted_by_sender = updated_msg.get("is_deleted_by_sender") or False
+            is_deleted_by_recipient = updated_msg.get("is_deleted_by_recipient") or False
+
+        if is_deleted_by_sender and is_deleted_by_recipient:
+            delete_rows("messages", filters={"id": f"eq.{message_id}"})
+            await _broadcast_message_event("message_update", {**message, "event_type": "message_deleted", "permanently_deleted": True}, _message_event_targets(message))
+            return {"status": "permanently_deleted"}
 
         await _broadcast_message_event("message_update", {**message, "event_type": "message_deleted"}, _message_event_targets(message))
         

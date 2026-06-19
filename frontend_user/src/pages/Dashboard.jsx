@@ -136,12 +136,12 @@ export default function Dashboard() {
   let loadsContent
   if (loading) {
     loadsContent = (
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading approved teaching loads...</div>
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-slate-500">Loading approved teaching load...</div>
     )
   } else if (teachingLoads.length === 0) {
     loadsContent = (
       <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-        No approved teaching loads yet.
+        No approved teaching load yet.
       </div>
     )
   } else {
@@ -150,7 +150,7 @@ export default function Dashboard() {
         <div className="space-y-4">
           <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
             <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500" htmlFor="trainer-progress-filter">
-              Filter teaching loads
+              Filter teaching load
             </label>
             <select
               id="trainer-progress-filter"

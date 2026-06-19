@@ -61,8 +61,8 @@ export default function Dashboard() {
       ]
     : [
         {
-          title: 'Review Teaching Loads',
-          description: 'Approve or reject pending teaching loads from the queue.',
+          title: 'Review Teaching Load',
+          description: 'Approve or reject pending teaching load from the queue.',
           icon: ClipboardCheck,
           action: () => navigate('/teaching-loads'),
         },

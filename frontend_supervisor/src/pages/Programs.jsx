@@ -267,7 +267,7 @@ export default function Programs() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900">Programs</h1>
-          <p className="mt-2 text-sm text-slate-600">Manage the qualification catalog used for trainer profiles and teaching loads.</p>
+          <p className="mt-2 text-sm text-slate-600">Manage the qualification catalog used for trainer profiles and teaching load.</p>
         </div>
         <button
           type="button"

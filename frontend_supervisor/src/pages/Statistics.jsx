@@ -57,7 +57,7 @@ export default function Statistics() {
       cacheManager.set(cacheKey, data)
     } catch (error) {
       console.error(error)
-      toast.error('Failed to load teaching loads statistics')
+      toast.error('Failed to load teaching load statistics')
     } finally {
       setLoadingYearStats(false)
     }
@@ -135,7 +135,7 @@ StatBar.propTypes = {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-black text-slate-900">Statistics</h1>
-        <p className="mt-2 text-sm text-slate-600">Portal-wide summaries for programs, teaching loads, and trainer account coverage.</p>
+        <p className="mt-2 text-sm text-slate-600">Portal-wide summaries for programs, teaching load, and trainer account coverage.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -183,12 +183,12 @@ StatBar.propTypes = {
         </div>
       </div>
 
-      {/* Teaching Loads by Year Section */}
+      {/* Teaching Load by Year Section */}
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Calendar className="h-5 w-5 text-sky-600" />
-            <h2 className="text-xl font-bold text-slate-900">Teaching Loads by Year</h2>
+            <h2 className="text-xl font-bold text-slate-900">Teaching Load by Year</h2>
           </div>
           <div className="flex items-center gap-3">
             <Filter className="h-4 w-4 text-slate-500" />
@@ -206,7 +206,7 @@ StatBar.propTypes = {
         </div>
 
         {loadingYearStats ? (
-          <div className="text-center py-8 text-slate-500">Loading teaching loads statistics...</div>
+          <div className="text-center py-8 text-slate-500">Loading teaching load statistics...</div>
         ) : (
           <div className="space-y-6">
             {/* Current Year/Filtered Stats */}

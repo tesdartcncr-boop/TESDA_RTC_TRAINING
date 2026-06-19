@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router-dom'
-import { KeyRound, Mail, Pencil, Plus, ShieldCheck, Trash2, User } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, Mail, Pencil, Plus, ShieldCheck, Trash2, User } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
@@ -19,6 +19,8 @@ export default function AdminAccounts() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState(null)
   const [accountToDelete, setAccountToDelete] = useState(null)
+  const [showCreatePassword, setShowCreatePassword] = useState(false)
+  const [showEditPassword, setShowEditPassword] = useState(false)
   const roleFilter = searchParams.get('role') || (user?.user_type === 'supervisor' ? 'supervisor' : '')
 
   const createForm = useForm({
@@ -93,6 +95,7 @@ export default function AdminAccounts() {
       cacheManager.clearPattern('stats_')
       setShowCreateModal(false)
       createForm.reset()
+      setShowCreatePassword(false)
       loadAccounts()
     } catch (error) {
       toast.error(error.message)
@@ -139,6 +142,7 @@ export default function AdminAccounts() {
       cacheManager.clearPattern('accounts_list:')
       cacheManager.clearPattern('stats_')
       setEditingAccount(null)
+      setShowEditPassword(false)
       loadAccounts()
     } catch (error) {
       toast.error(error.message)
@@ -254,7 +258,7 @@ export default function AdminAccounts() {
       )}
 
       {showCreateModal && (
-        <ModalShell title="Create Management Account" onClose={() => setShowCreateModal(false)} maxWidth="max-w-xl">
+        <ModalShell title="Create Management Account" onClose={() => { setShowCreateModal(false); setShowCreatePassword(false); }} maxWidth="max-w-xl">
           <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Full Name</label>
@@ -283,7 +287,20 @@ export default function AdminAccounts() {
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Password</label>
-              <input type="password" {...createForm.register('password', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <div className="relative mt-2">
+                <input
+                  type={showCreatePassword ? 'text' : 'password'}
+                  {...createForm.register('password', { required: true })}
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 pr-11 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePassword((current) => !current)}
+                  className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                >
+                  {showCreatePassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Account Role</label>
@@ -301,7 +318,7 @@ export default function AdminAccounts() {
       )}
 
       {editingAccount && (
-        <ModalShell title="Edit Account" onClose={() => setEditingAccount(null)} maxWidth="max-w-xl">
+        <ModalShell title="Edit Account" onClose={() => { setEditingAccount(null); setShowEditPassword(false); }} maxWidth="max-w-xl">
           <form className="space-y-4" onSubmit={editForm.handleSubmit(handleUpdate)}>
             <div>
               <label className="block text-sm font-semibold text-slate-700">Full Name</label>
@@ -328,7 +345,19 @@ export default function AdminAccounts() {
               <label className="block text-sm font-semibold text-slate-700">New Password</label>
               <div className="relative mt-2">
                 <KeyRound className="pointer-events-none absolute left-3 top-3.5 h-5 w-5 text-slate-400" />
-                <input type="password" {...editForm.register('password')} placeholder="Leave blank to keep current password" className="w-full rounded-2xl border border-slate-200 px-4 py-3 pl-11 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+                <input
+                  type={showEditPassword ? 'text' : 'password'}
+                  {...editForm.register('password')}
+                  placeholder="Leave blank to keep current password"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 pl-11 pr-11 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEditPassword((current) => !current)}
+                  className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                >
+                  {showEditPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
             </div>
             {user?.user_type === 'admin' && (
@@ -338,7 +367,7 @@ export default function AdminAccounts() {
               </label>
             )}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setEditingAccount(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="button" onClick={() => { setEditingAccount(null); setShowEditPassword(false); }} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
               <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
                 {isProcessing ? 'Updating...' : 'Update Account'}
               </button>

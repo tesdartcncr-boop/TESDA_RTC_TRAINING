@@ -279,7 +279,7 @@ export default function GenerateReport() {
   const getSelectedSignerIds = () => Array.from(new Set(
     selectedLoads
       .flatMap((load) => [
-        load.assigned_by_signature_enabled ? load.assigned_by : null,
+        load.assigned_by,
         load.approved_by,
       ])
       .filter(Boolean)
@@ -473,7 +473,7 @@ export default function GenerateReport() {
         return Array.from(map.values())
       }
 
-      const preparedList = uniqueList(selectedLoads, 'assigned_by', 'assigned_by_name', 'assigned_by_position', 'assigned_by_signature_enabled')
+      const preparedList = uniqueList(selectedLoads, 'assigned_by', 'assigned_by_name', 'assigned_by_position')
       const approvedList = uniqueList(selectedLoads, 'approved_by', 'approved_by_name', 'approved_by_position')
 
       // Calculate block heights based on number of signatories (stack vertically if multiple)

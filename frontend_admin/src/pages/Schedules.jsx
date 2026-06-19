@@ -131,7 +131,7 @@ export default function Schedules() {
       }
     } catch (error) {
       console.error(error)
-      toast.error('Failed to load teaching loads')
+      toast.error('Failed to load teaching load')
     } finally {
       setLoading(false)
     }
@@ -438,12 +438,20 @@ export default function Schedules() {
 
     setIsProcessing(true)
     try {
+      let finalUseDigitalSignature = false
       if (signatureChoice === 'upload' && signatureUpload?.imageData) {
         const signature = await saveMySignature(API_BASE, getToken(), signatureUpload.imageData, signatureUpload.fileName)
         setSavedSignature(signature)
         setSignatureUpload(null)
         setSignatureChoice('existing')
         toast.success('Signature saved for future reports')
+        finalUseDigitalSignature = true
+      } else if (savedSignature) {
+        finalUseDigitalSignature = true
+      } else {
+        toast.error('A digital signature is required. Please upload one.')
+        setIsProcessing(false)
+        return
       }
 
       const response = await fetch(`${API_BASE}/api/trainers/${values.trainer_id}/programs`, {
@@ -457,7 +465,7 @@ export default function Schedules() {
           hours_per_day: Number.parseInt(values.hours_per_day, 10),
           schedule_date: values.schedule_date || null,
           batch: values.batch || null,
-          use_digital_signature: signatureChoice !== 'none',
+          use_digital_signature: finalUseDigitalSignature,
         }),
       })
       if (!response.ok) {
@@ -521,9 +529,9 @@ export default function Schedules() {
   const calendarDays = selectedAssignment?.program_days || 0
   let assignmentsPanel
   if (loading) {
-    assignmentsPanel = <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center text-slate-500">Loading teaching loads...</div>
+    assignmentsPanel = <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center text-slate-500">Loading teaching load...</div>
   } else if (filteredAssignments.length === 0) {
-    assignmentsPanel = <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">No teaching loads found.</div>
+    assignmentsPanel = <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">No teaching load found.</div>
   } else {
     assignmentsPanel = filteredAssignments.map((assignment) => (
       <button
@@ -657,7 +665,7 @@ export default function Schedules() {
       )}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-black text-slate-900">Teaching Loads</h1>
+          <h1 className="text-3xl font-black text-slate-900">Teaching Load</h1>
           <p className="mt-2 text-sm text-slate-600">Assign qualified trainers, generate weekday calendars, and approve the load workflow.</p>
         </div>
         {user?.user_type === 'admin' && (
@@ -748,27 +756,14 @@ export default function Schedules() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-slate-800">Digital Signature</p>
-                  <p className="text-xs text-slate-500">Optional. Saved to your account and reused on generated reports.</p>
+                  <p className="text-xs text-slate-500">Required. Saved to your account and reused on generated reports.</p>
                 </div>
-                {savedSignature && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSignatureChoice('existing')
-                      setSignatureUpload(null)
-                    }}
-                    className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
-                      signatureChoice === 'existing'
-                        ? 'bg-sky-600 text-white'
-                        : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    Use Existing Signature
-                  </button>
-                )}
               </div>
-              {(signatureUpload?.imageData || savedSignature?.image_data) && signatureChoice !== 'none' && (
+              {(signatureUpload?.imageData || savedSignature?.image_data) && (
                 <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-semibold text-slate-400 mb-1">
+                    {signatureUpload?.imageData ? "New Signature Preview" : "Existing Signature Preview"}
+                  </p>
                   <img
                     src={signatureUpload?.imageData || savedSignature?.image_data}
                     alt="Signature preview"
@@ -779,23 +774,21 @@ export default function Schedules() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <label className="inline-flex cursor-pointer items-center rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100">
                   <Upload className="mr-2 h-4 w-4" />
-                  Upload Signature
+                  {savedSignature ? 'Upload New Signature' : 'Upload Signature'}
                   <input type="file" accept="image/png,image/jpeg" onChange={handleSignatureFileChange} className="hidden" />
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSignatureChoice('none')
-                    setSignatureUpload(null)
-                  }}
-                  className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
-                    signatureChoice === 'none'
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  Do Not Use Digital Signature
-                </button>
+                {savedSignature && signatureChoice !== 'existing' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSignatureChoice('existing')
+                      setSignatureUpload(null)
+                    }}
+                    className="rounded-xl bg-white text-slate-700 px-3 py-2 text-xs font-semibold ring-1 ring-slate-200 transition hover:bg-slate-100"
+                  >
+                    Use Existing Signature
+                  </button>
+                )}
               </div>
             </div>
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
