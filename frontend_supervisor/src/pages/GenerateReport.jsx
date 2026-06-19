@@ -7,7 +7,7 @@ import { cacheManager } from '../utils/cacheManager'
 import { getSocket } from '../utils/socket'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
-const REPORT_CACHE_VERSION = 'v4'
+const REPORT_CACHE_VERSION = 'v5'
 
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 
@@ -46,6 +46,8 @@ const loadApprovalLabel = (load) => {
   }
   return 'Approved'
 }
+
+const isApprovedLoad = (load) => load?.approval_status === 'approved'
 
 const toDataUrl = async (response) => {
   const blob = await response.blob()
@@ -92,14 +94,6 @@ const getTrainerSearchText = (trainer) => {
     .toLowerCase()
 }
 
-const getQualificationLabel = (qualification) => {
-  const programName = qualification?.program?.name || 'Unnamed qualification'
-  const programType = qualification?.program?.type || 'N/A'
-  const nttcNumber = qualification?.nttc_number || 'N/A'
-  const expiration = qualification?.nttc_expiration ? formatDate(qualification.nttc_expiration) : 'N/A'
-  return `${programName} (${programType}) | NTTC: ${nttcNumber} | Exp: ${expiration}`
-}
-
 export default function GenerateReport() {
   const [trainers, setTrainers] = useState([])
   const [selectedTrainerId, setSelectedTrainerId] = useState('')
@@ -108,7 +102,6 @@ export default function GenerateReport() {
   const [trainerSearch, setTrainerSearch] = useState('')
   const [loadingTrainers, setLoadingTrainers] = useState(true)
   const [loadingLoads, setLoadingLoads] = useState(false)
-  const [qualifications, setQualifications] = useState([])
   const [generating, setGenerating] = useState(false)
 
   const selectedTrainer = useMemo(
@@ -192,18 +185,19 @@ export default function GenerateReport() {
       })
       const cached = cacheManager.get(cacheKey)
       if (cached !== null) {
-        setLoads(cached)
-        setSelectedLoadIds(new Set(cached.map((load) => load.id)))
+        const approvedCachedLoads = cached.filter(isApprovedLoad)
+        setLoads(approvedCachedLoads)
+        setSelectedLoadIds(new Set(approvedCachedLoads.map((load) => load.id)))
         return
       }
 
-      const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs?approval_status=approved`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
       const nextLoads = Array.isArray(data) ? data : []
       const fallbackLoads = Array.isArray(data?.data) ? data.data : []
-      const resolvedLoads = nextLoads.length > 0 ? nextLoads : fallbackLoads
+      const resolvedLoads = (nextLoads.length > 0 ? nextLoads : fallbackLoads).filter(isApprovedLoad)
       setLoads(resolvedLoads)
       setSelectedLoadIds(new Set(resolvedLoads.map((load) => load.id)))
       cacheManager.set(cacheKey, resolvedLoads)
@@ -214,42 +208,6 @@ export default function GenerateReport() {
       setSelectedLoadIds(new Set())
     } finally {
       setLoadingLoads(false)
-    }
-  }, [])
-
-  const loadTrainerQualifications = useCallback(async (trainerId) => {
-    if (!trainerId) {
-      setQualifications([])
-      return
-    }
-
-    try {
-      const cacheKey = cacheManager.generateKey('supervisor_report_qualifications', {
-        trainer_id: trainerId,
-        version: REPORT_CACHE_VERSION,
-      })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setQualifications(cached)
-        return
-      }
-
-      const response = await fetch(`${API_BASE}/api/trainers/${trainerId}/qualifications`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to load trainer qualifications')
-      }
-
-      const data = await response.json()
-      const nextQualifications = Array.isArray(data?.data) ? data.data : []
-      setQualifications(nextQualifications)
-      cacheManager.set(cacheKey, nextQualifications)
-    } catch (error) {
-      console.error(error)
-      toast.error('Failed to load trainer qualifications')
-      setQualifications([])
     }
   }, [])
 
@@ -265,8 +223,7 @@ export default function GenerateReport() {
 
   useEffect(() => {
     loadTrainerLoads(selectedTrainerId)
-    loadTrainerQualifications(selectedTrainerId)
-  }, [loadTrainerLoads, loadTrainerQualifications, selectedTrainerId])
+  }, [loadTrainerLoads, selectedTrainerId])
 
   useEffect(() => {
     const socket = getSocket()
@@ -277,7 +234,6 @@ export default function GenerateReport() {
       loadTrainers()
       if (selectedTrainerId) {
         loadTrainerLoads(selectedTrainerId)
-        loadTrainerQualifications(selectedTrainerId)
       }
     }
 
@@ -290,7 +246,7 @@ export default function GenerateReport() {
       socket.off('schedule_update', refreshReportCaches)
       socket.off('trainer_update', refreshReportCaches)
     }
-  }, [loadTrainers, loadTrainerLoads, loadTrainerQualifications, selectedTrainerId])
+  }, [loadTrainers, loadTrainerLoads, selectedTrainerId])
 
   const toggleLoad = (loadId) => {
     setSelectedLoadIds((current) => {
@@ -308,7 +264,7 @@ export default function GenerateReport() {
     setSelectedLoadIds(new Set(enabled ? loads.map((load) => load.id) : []))
   }
 
-  const drawPdfHeader = async (doc, logoDataUrl, title, trainerName, trainerTmNumber, trainerQualifications) => {
+  const drawPdfHeader = async (doc, logoDataUrl, title, trainerName, trainerTmNumber, trainerPrograms) => {
     const pageWidth = doc.internal.pageSize.getWidth()
     const margin = 14
 
@@ -340,11 +296,11 @@ export default function GenerateReport() {
     doc.text(`Selected Loads: ${selectedLoads.length}`, margin, 60)
 
     const infoTop = 64
-    const qualificationText = trainerQualifications.length > 0
-      ? trainerQualifications.map((qualification) => qualification.program?.name || 'Unnamed qualification').join(' • ')
-      : 'No recorded qualifications'
-    const splitQualifications = doc.splitTextToSize(`Qualifications: ${qualificationText}`, pageWidth - margin * 2 - 6)
-    const infoHeight = Math.max(18, 12 + splitQualifications.length * 4)
+    const programText = trainerPrograms.length > 0
+      ? trainerPrograms.map((load) => load.program_name || 'Unnamed program').join(', ')
+      : 'No selected programs'
+    const splitPrograms = doc.splitTextToSize(`Program/s: ${programText}`, pageWidth - margin * 2 - 6)
+    const infoHeight = Math.max(18, 12 + splitPrograms.length * 4)
 
     doc.setDrawColor(203, 213, 225)
     doc.setFillColor(248, 250, 252)
@@ -354,7 +310,7 @@ export default function GenerateReport() {
     doc.setTextColor(15, 23, 42)
     doc.text(`TM Number: ${trainerTmNumber || 'N/A'}`, margin + 3, infoTop + 7)
     doc.setFont('helvetica', 'normal')
-    doc.text(splitQualifications, margin + 3, infoTop + 13)
+    doc.text(splitPrograms, margin + 3, infoTop + 13)
 
     return infoTop + infoHeight + 6
   }
@@ -380,13 +336,13 @@ export default function GenerateReport() {
         'Trainer Teaching Load Report',
         selectedTrainerName,
         selectedTrainerTmNumber,
-        qualifications,
+        selectedLoads,
       )
 
       autoTable(doc, {
         startY: tableStartY,
         margin: { left: 14, right: 14 },
-        head: [['Program', 'Type', 'Approval', 'Progress', 'Hours/Day', 'Days', 'Start Date']],
+        head: [['Program', 'Modality', 'Approval', 'Progress', 'Hours/Day', 'Days', 'Start Date']],
         body: selectedLoads.map((load) => [
           load.program_name || 'Unnamed program',
           load.program_type || 'N/A',
@@ -449,13 +405,8 @@ export default function GenerateReport() {
       if (needsNewPage) doc.addPage()
 
       const footerY = needsNewPage ? 20 : footerStartY
-      const blockTop = footerY + 8
+      const blockTop = footerY
       const blockWidth = (doc.internal.pageSize.getWidth() - footerMargin * 2 - 8) / 2
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(11)
-      doc.setTextColor(15, 23, 42)
-      doc.text('Signatories', footerMargin, footerY)
 
       const renderSignatoryList = (x, label, items) => {
         doc.setDrawColor(203, 213, 225)
