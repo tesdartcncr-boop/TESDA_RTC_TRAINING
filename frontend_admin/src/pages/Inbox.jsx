@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Mail, Reply, Send } from 'lucide-react'
+import { Activity, AlertCircle, Mail, Reply, Send } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
@@ -60,6 +60,7 @@ export default function Inbox() {
   const [showComposeModal, setShowComposeModal] = useState(false)
   const [sentMessages, setSentMessages] = useState([])
   const [receivedMessages, setReceivedMessages] = useState([])
+  const [activityUpdates, setActivityUpdates] = useState([])
   const [activeMailbox, setActiveMailbox] = useState('received')
   const [selectedMessageId, setSelectedMessageId] = useState(null)
   const [replyContent, setReplyContent] = useState('')
@@ -69,8 +70,8 @@ export default function Inbox() {
 
   const safeTrainerUsers = Array.isArray(trainerUsers) ? trainerUsers : []
   const currentUserId = String(user?.user_id || user?.id || '')
-  const mailboxMessages = activeMailbox === 'received' ? receivedMessages : sentMessages
-  const selectedMessage = mailboxMessages.find((message) => message.id === selectedMessageId) || null
+  const mailboxMessages = activeMailbox === 'received' ? receivedMessages : activeMailbox === 'sent' ? sentMessages : []
+  const selectedMessage = activeMailbox === 'updates' ? null : mailboxMessages.find((message) => message.id === selectedMessageId) || null
   const allMessages = dedupeMessages([...receivedMessages, ...sentMessages])
   const threadMessages = buildThreadMessages(selectedMessage, allMessages)
 
@@ -167,6 +168,43 @@ export default function Inbox() {
     }
   }, [currentUserId])
 
+  const loadActivityUpdates = useCallback(async ({ useCache = true } = {}) => {
+    if (!currentUserId) return
+
+    try {
+      const cacheKey = cacheManager.generateKey('admin_activity_updates', { user_id: currentUserId })
+      if (useCache) {
+        const cached = cacheManager.get(cacheKey)
+        if (cached !== null) {
+          setActivityUpdates(cached)
+          return
+        }
+      }
+
+      const response = await fetch(`${API_BASE}/api/messages/updates?limit=100`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+
+      if (response.status === 404) {
+        setActivityUpdates([])
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const updates = Array.isArray(data.data) ? data.data : []
+      const sortedUpdates = [...updates].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      setActivityUpdates(sortedUpdates)
+      cacheManager.set(cacheKey, sortedUpdates, 60000)
+    } catch (loadError) {
+      console.error('Failed to load activity updates:', loadError)
+      setActivityUpdates([])
+    }
+  }, [currentUserId])
+
   useEffect(() => {
     const loadData = async () => {
       if (!user) {
@@ -176,14 +214,19 @@ export default function Inbox() {
 
       setLoading(true)
       setError(null)
-      await Promise.all([loadTrainerUsers(), loadMessages()])
+      await Promise.all([loadTrainerUsers(), loadMessages(), loadActivityUpdates()])
       setLoading(false)
     }
 
     loadData()
-  }, [user, loadMessages, loadTrainerUsers])
+  }, [user, loadActivityUpdates, loadMessages, loadTrainerUsers])
 
   useEffect(() => {
+    if (activeMailbox === 'updates') {
+      setSelectedMessageId(null)
+      return
+    }
+
     if (mailboxMessages.length === 0) {
       setSelectedMessageId(null)
       return
@@ -215,22 +258,29 @@ export default function Inbox() {
 
       const handleMessageEvent = () => {
         loadMessages({ useCache: false })
+        loadActivityUpdates({ useCache: false })
         const cacheKey = cacheManager.generateKey('admin_messages', { user_id: user.user_id || user.id })
         cacheManager.delete(cacheKey)
+      }
+      const handleActivityEvent = () => {
+        loadActivityUpdates({ useCache: false })
+        cacheManager.delete(cacheManager.generateKey('admin_activity_updates', { user_id: user.user_id || user.id }))
       }
 
       socket.on('new_message', handleMessageEvent)
       socket.on('message_update', handleMessageEvent)
+      socket.on('activity_update', handleActivityEvent)
 
       return () => {
         socket.off('new_message', handleMessageEvent)
         socket.off('message_update', handleMessageEvent)
+        socket.off('activity_update', handleActivityEvent)
       }
     } catch (socketError) {
       console.error('Failed to setup websocket:', socketError)
       return undefined
     }
-  }, [isAuthenticated, loadMessages, user])
+  }, [isAuthenticated, loadActivityUpdates, loadMessages, user])
 
   useEffect(() => {
     if (!isAuthenticated || !user) return undefined
@@ -238,11 +288,12 @@ export default function Inbox() {
     const interval = setInterval(() => {
       if (!document.hidden) {
         loadMessages({ useCache: false })
+        loadActivityUpdates({ useCache: false })
       }
     }, 60000)
 
     return () => clearInterval(interval)
-  }, [isAuthenticated, loadMessages, user])
+  }, [isAuthenticated, loadActivityUpdates, loadMessages, user])
 
   const handleSendMessage = async (messageData) => {
     try {
@@ -268,6 +319,14 @@ export default function Inbox() {
       console.error('Failed to send message:', sendError)
       throw sendError
     }
+  }
+
+  const getUpdateTone = (update) => {
+    if (update?.action_type === 'message_sent') {
+      return 'border-cyan-100 bg-cyan-50 text-cyan-700'
+    }
+
+    return 'border-slate-200 bg-white text-slate-700'
   }
 
   const handleMessageSelect = async (message) => {
@@ -480,12 +539,52 @@ export default function Inbox() {
               >
                 Sent ({sentMessages.length})
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveMailbox('updates')}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  activeMailbox === 'updates'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Updates ({activityUpdates.length})
+              </button>
             </div>
           </div>
         </div>
 
         {loading ? (
           <div className="py-14 text-center text-slate-500">Loading messages...</div>
+        ) : activeMailbox === 'updates' ? (
+          activityUpdates.length === 0 ? (
+            <div className="py-14 text-center text-slate-500">
+              <Activity className="mx-auto mb-4 h-12 w-12 text-slate-400" />
+              <h3 className="mb-2 text-lg font-semibold text-slate-900">No trainer updates yet</h3>
+              <p>Trainer schedule actions and messages will appear here.</p>
+            </div>
+          ) : (
+            <div className="max-h-[34rem] space-y-3 overflow-y-auto bg-slate-50/60 p-4">
+              {activityUpdates.map((update) => (
+                <article key={update.id} className={`rounded-2xl border p-4 shadow-sm ${getUpdateTone(update)}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">{update.action_label}</p>
+                      <p className="mt-1 text-sm text-slate-700">{update.details}</p>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {formatDate(update.created_at)}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                    {update.trainer_name ? <span className="rounded-full bg-white px-2 py-1">Trainer: {update.trainer_name}</span> : null}
+                    {update.program_name ? <span className="rounded-full bg-white px-2 py-1">Program: {update.program_name}</span> : null}
+                    {update.metadata?.day_number ? <span className="rounded-full bg-white px-2 py-1">Day {update.metadata.day_number}</span> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
         ) : mailboxMessages.length === 0 ? (
           <div className="py-14 text-center text-slate-500">
             <Mail className="mx-auto mb-4 h-12 w-12 text-slate-400" />

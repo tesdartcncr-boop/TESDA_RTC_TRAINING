@@ -10,10 +10,14 @@ const getToken = () => localStorage.getItem('trainer_token') || sessionStorage.g
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
   { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
+  { key: 'nat', label: 'NAT - No Action Taken', shortLabel: 'NAT', color: 'bg-slate-600' },
   { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
   { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
   { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
 ]
+
+const getStatusOption = (status) => STATUS_OPTIONS.find((option) => option.key === status)
+const getStatusDisplay = (status) => getStatusOption(status)?.shortLabel || status || 'open'
 
 const isFutureDay = (scheduleDate) => {
   if (!scheduleDate) return false
@@ -210,7 +214,7 @@ return (
                       
                       const entry = dayMap[day.dayNumber]
                       const status = entry?.status
-                      const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+                      const color = getStatusOption(status)?.color || 'bg-slate-300'
                       const locked = isFutureDay(entry?.schedule_date)
                       
                       return (
@@ -224,11 +228,11 @@ return (
                           <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
                           <div className="mt-1 flex justify-center">
                             <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                              {status ? status.charAt(0).toUpperCase() : day.dayNumber}
+                              {status ? getStatusDisplay(status).charAt(0).toUpperCase() : day.dayNumber}
                             </span>
                           </div>
                           <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
-                            {locked ? 'locked' : (status || 'open')}
+                            {locked ? 'locked' : getStatusDisplay(status)}
                           </p>
                         </button>
                       )

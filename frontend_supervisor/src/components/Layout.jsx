@@ -1,10 +1,10 @@
 import React from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Clock3, FileText, LogOut, Menu, Settings, X } from 'lucide-react'
+import { BarChart3, CalendarDays, Clock3, FileText, LogOut, Menu, Settings, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const supervisorNavigation = [
-  { name: 'Schedules', href: '/schedules', icon: Settings },
+  { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   { name: 'Generate Report', href: '/generate-report', icon: FileText },
   { name: 'Statistics', href: '/statistics', icon: BarChart3 },
   { name: 'History', href: '/history', icon: Clock3 },

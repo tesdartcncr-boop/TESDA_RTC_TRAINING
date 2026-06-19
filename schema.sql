@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
     day_number INTEGER NOT NULL,
     hours_per_day INTEGER NOT NULL CHECK (hours_per_day IN (4, 8)),
-    status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave', 'incomplete')),
+    status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'nat', 'suspended', 'leave', 'incomplete')),
     schedule_date DATE,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -180,7 +180,7 @@ ALTER TABLE IF EXISTS schedules
 DROP CONSTRAINT IF EXISTS schedules_status_check;
 
 ALTER TABLE IF EXISTS schedules 
-ADD CONSTRAINT schedules_status_check CHECK (status IS NULL OR status IN ('complete', 'absent', 'suspended', 'leave', 'incomplete'));
+ADD CONSTRAINT schedules_status_check CHECK (status IS NULL OR status IN ('complete', 'absent', 'nat', 'suspended', 'leave', 'incomplete'));
 
 -- Add missing columns to trainer_programs table if they don't exist
 ALTER TABLE IF EXISTS trainer_programs
@@ -377,6 +377,25 @@ CREATE INDEX IF NOT EXISTS idx_messages_recipient_status ON messages(recipient_i
 CREATE INDEX IF NOT EXISTS idx_messages_sender_created ON messages(sender_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(recipient_id, status) WHERE status = 'unread';
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON message_notifications(user_id, is_read) WHERE is_read = FALSE;
+
+-- Trainer activity updates for the admin Inbox Updates tab.
+CREATE TABLE IF NOT EXISTS trainer_activity_updates (
+    id SERIAL PRIMARY KEY,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    trainer_id INTEGER REFERENCES trainers(id) ON DELETE SET NULL,
+    program_id INTEGER REFERENCES programs(id) ON DELETE SET NULL,
+    schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+    message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    action_type VARCHAR(40) NOT NULL CHECK (action_type IN ('schedule_status', 'message_sent')),
+    action_label VARCHAR(120) NOT NULL,
+    details TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_trainer_activity_updates_created ON trainer_activity_updates(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trainer_activity_updates_actor ON trainer_activity_updates(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_trainer_activity_updates_trainer ON trainer_activity_updates(trainer_id);
 
 -- Function to get unread message count for a user
 CREATE OR REPLACE FUNCTION get_unread_message_count(p_user_id INTEGER)

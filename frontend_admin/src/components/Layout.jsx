@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Briefcase, Clock3, Home, LogOut, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react'
+import { BarChart3, Briefcase, CalendarDays, Clock3, Home, LogOut, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import MessageNotifications from './MessageNotifications'
 
@@ -8,7 +8,7 @@ const adminNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Inbox', href: '/inbox', icon: Briefcase },
   { name: 'Teaching Loads', href: '/teaching-loads', icon: Settings },
-  { name: 'Schedules', href: '/schedules', icon: Settings },
+  { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   { name: 'Trainer', href: '/trainers', icon: Users },
   { name: 'Program', href: '/programs', icon: Briefcase },
   { name: 'Admin Accounts', href: '/admin-accounts', icon: ShieldCheck },
@@ -19,7 +19,7 @@ const adminNavigation = [
 const supervisorNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Teaching Loads', href: '/teaching-loads', icon: Briefcase },
-  { name: 'Schedules', href: '/schedules', icon: Settings },
+  { name: 'Schedules', href: '/schedules', icon: CalendarDays },
   { name: 'Center Chief Accounts', href: '/admin-accounts?role=supervisor', icon: ShieldCheck },
   { name: 'Statistics', href: '/statistics', icon: BarChart3 },
   { name: 'History', href: '/history', icon: Clock3 },

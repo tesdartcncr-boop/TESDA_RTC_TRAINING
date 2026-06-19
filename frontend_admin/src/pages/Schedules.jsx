@@ -12,6 +12,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const STATUS_COLORS = {
   complete: 'bg-emerald-500',
   absent: 'bg-rose-500',
+  nat: 'bg-slate-600',
   leave: 'bg-sky-500',
   suspended: 'bg-amber-500',
   incomplete: 'bg-orange-500',
@@ -19,10 +20,14 @@ const STATUS_COLORS = {
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
   { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
+  { key: 'nat', label: 'NAT - No Action Taken', shortLabel: 'NAT', color: 'bg-slate-600' },
   { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
   { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
   { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
 ]
+
+const getStatusOption = (status) => STATUS_OPTIONS.find((option) => option.key === status)
+const getStatusDisplay = (status) => getStatusOption(status)?.shortLabel || status || 'open'
 
 const getProgressBadge = (assignment) => {
   const completed = assignment?.progress_status === 'completed'
@@ -568,17 +573,17 @@ export default function Schedules() {
           {Array.from({ length: calendarDays }, (_, index) => index + 1).map((dayNumber) => {
             const entry = scheduleDays.find((row) => row.day_number === dayNumber)
             const status = entry?.status
-            const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+            const color = getStatusOption(status)?.color || 'bg-slate-300'
             return (
               <div key={dayNumber} className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Day {dayNumber}</p>
                 <p className="mt-2 text-sm font-semibold text-slate-700">{entry?.schedule_date || 'Pending date'}</p>
                 <div className="mt-4 flex justify-center">
                   <span className={`inline-flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                    {status ? status.charAt(0).toUpperCase() : dayNumber}
+                    {status ? getStatusDisplay(status).charAt(0).toUpperCase() : dayNumber}
                   </span>
                 </div>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{status || 'open'}</p>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{getStatusDisplay(status)}</p>
               </div>
             )
           })}
@@ -690,7 +695,7 @@ export default function Schedules() {
               <input id="teaching_load_batch" type="text" {...createForm.register('batch')} placeholder="yyyy-batch" className={`${fieldClassName} mt-2`} />
             </div>
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-              The calendar is generated automatically using weekdays only. New extra days are added when a day is marked absent, leave, suspended, or incomplete.
+              The calendar is generated automatically using weekdays only. New extra days are added when a day is marked absent, NAT, leave, suspended, or incomplete.
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>

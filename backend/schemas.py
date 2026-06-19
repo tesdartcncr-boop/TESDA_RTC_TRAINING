@@ -29,6 +29,7 @@ class ApprovalStatus(enum.Enum):
 class ScheduleStatus(enum.Enum):
     COMPLETE = "complete"
     ABSENT = "absent"
+    NAT = "nat"
     LEAVE = "leave"
     SUSPENDED = "suspended"
     INCOMPLETE = "incomplete"

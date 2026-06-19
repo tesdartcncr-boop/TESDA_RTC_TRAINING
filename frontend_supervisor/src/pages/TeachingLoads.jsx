@@ -30,6 +30,8 @@ const getLoadOwner = (load) => {
     tone: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   }
 }
+const isSameId = (left, right) => String(left) === String(right)
+const getProgressKey = (status) => String(status || '').trim().toLowerCase().replace(/\s+/g, '-')
 
 const getTotalPages = (payload, page) => {
   if (Number.isFinite(payload?.totalPages) && payload.totalPages > 0) {
@@ -69,7 +71,7 @@ export default function TeachingLoads() {
   const [expandedItems, setExpandedItems] = useState(new Set())
   const [teachingLoadsLoading, setTeachingLoadsLoading] = useState(false)
   const [allTeachingLoads, setAllTeachingLoads] = useState([])
-  const [programProgressFilter, setProgramProgressFilter] = useState('completed')
+  const [programProgressFilter, setProgramProgressFilter] = useState('all')
   const [trainerProgressFilter, setTrainerProgressFilter] = useState('all')
 
   // Load all teaching loads summary for badge counts
@@ -576,7 +578,7 @@ function ProgramsView({
   setProgressFilter,
   onRequestDelete,
 }) {
-  const matchesProgressFilter = (load) => progressFilter === 'all' || load?.progress_status === progressFilter
+  const matchesProgressFilter = (load) => progressFilter === 'all' || getProgressKey(load?.progress_status) === progressFilter
 
   return (
     <div className="space-y-4">
@@ -616,7 +618,7 @@ function ProgramsView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {(selectedProgram?.id === program.id ? teachingLoads : allTeachingLoads).filter((load) => load.program_id === program.id && matchesProgressFilter(load)).length} trainers
+                    {(selectedProgram?.id === program.id ? teachingLoads : allTeachingLoads).filter((load) => isSameId(load.program_id, program.id) && matchesProgressFilter(load)).length} trainers
                   </span>
                   {expandedItems.has(program.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -636,8 +638,11 @@ function ProgramsView({
                   <p className="text-sm text-slate-500">No teaching loads assigned to this program.</p>
                 ) : (
                   <div className="space-y-2">
+                    {teachingLoads.filter((load) => isSameId(load.program_id, program.id) && matchesProgressFilter(load)).length === 0 ? (
+                      <p className="text-sm text-slate-500">No teaching loads match this filter.</p>
+                    ) : null}
                     {teachingLoads
-                      .filter((load) => load.program_id === program.id && matchesProgressFilter(load))
+                      .filter((load) => isSameId(load.program_id, program.id) && matchesProgressFilter(load))
                       .map((load) => (
                         <div
                           key={load.id}
@@ -710,7 +715,7 @@ function TrainersView({
   setProgressFilter,
   onRequestDelete,
 }) {
-  const matchesProgressFilter = (load) => progressFilter === 'all' || load?.progress_status === progressFilter
+  const matchesProgressFilter = (load) => progressFilter === 'all' || getProgressKey(load?.progress_status) === progressFilter
 
   return (
     <div className="space-y-4">
@@ -750,7 +755,7 @@ function TrainersView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold text-cyan-700">
-                    {(selectedTrainer?.id === trainer.id ? teachingLoads : allTeachingLoads).filter((load) => load.trainer_id === trainer.id && matchesProgressFilter(load)).length} programs
+                    {(selectedTrainer?.id === trainer.id ? teachingLoads : allTeachingLoads).filter((load) => isSameId(load.trainer_id, trainer.id) && matchesProgressFilter(load)).length} programs
                   </span>
                   {expandedItems.has(trainer.id) ? (
                     <ChevronUp className="h-5 w-5 text-slate-400" />
@@ -770,8 +775,11 @@ function TrainersView({
                   <p className="text-sm text-slate-500">No teaching loads assigned to this trainer.</p>
                 ) : (
                   <div className="space-y-2">
+                    {teachingLoads.filter((load) => isSameId(load.trainer_id, trainer.id) && matchesProgressFilter(load)).length === 0 ? (
+                      <p className="text-sm text-slate-500">No teaching loads match this filter.</p>
+                    ) : null}
                     {teachingLoads
-                      .filter((load) => load.trainer_id === trainer.id && matchesProgressFilter(load))
+                      .filter((load) => isSameId(load.trainer_id, trainer.id) && matchesProgressFilter(load))
                       .map((load) => (
                         <div
                           key={load.id}
@@ -852,10 +860,13 @@ function ReadOnlyCalendarView({ teachingLoad }) {
   const STATUS_OPTIONS = [
     { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
     { key: 'absent', label: 'Absent', color: 'bg-rose-500' },
+    { key: 'nat', label: 'NAT - No Action Taken', shortLabel: 'NAT', color: 'bg-slate-600' },
     { key: 'leave', label: 'On Leave', color: 'bg-sky-500' },
     { key: 'suspended', label: 'Suspended', color: 'bg-amber-500' },
     { key: 'incomplete', label: 'Incomplete', color: 'bg-orange-500' },
   ]
+  const getStatusOption = (status) => STATUS_OPTIONS.find((option) => option.key === status)
+  const getStatusDisplay = (status) => getStatusOption(status)?.shortLabel || status || 'open'
 
   // Helper function to generate calendar weeks
   const generateCalendarWeeks = (totalDays) => {
@@ -947,7 +958,7 @@ function ReadOnlyCalendarView({ teachingLoad }) {
                   
                   const entry = dayMap[day.dayNumber]
                   const status = entry?.status
-                  const color = STATUS_OPTIONS.find((option) => option.key === status)?.color || 'bg-slate-300'
+                  const color = getStatusOption(status)?.color || 'bg-slate-300'
                   
                   return (
                     <div
@@ -957,11 +968,11 @@ function ReadOnlyCalendarView({ teachingLoad }) {
                       <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
                       <div className="mt-1 flex justify-center">
                         <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                          {status ? status.charAt(0).toUpperCase() : day.dayNumber}
+                          {status ? getStatusDisplay(status).charAt(0).toUpperCase() : day.dayNumber}
                         </span>
                       </div>
                       <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
-                        {status || 'open'}
+                        {getStatusDisplay(status)}
                       </p>
                     </div>
                   )

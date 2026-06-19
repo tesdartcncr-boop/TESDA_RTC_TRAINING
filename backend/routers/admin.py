@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -54,7 +54,11 @@ def _build_history_rows(records: list[dict], kind: str) -> list[dict]:
 
 
 def get_teaching_loads_summary_cache_key() -> str:
-    return cache_manager.get_cache_key("teaching_loads_summary", scope="approved")
+    return cache_manager.get_cache_key(
+        "teaching_loads_summary",
+        scope="approved",
+        cache_day=date.today().isoformat(),
+    )
 
 
 @router.get("/dashboard/stats")

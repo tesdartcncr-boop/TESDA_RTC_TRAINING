@@ -19,18 +19,20 @@ export default function AdminAccounts() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState(null)
   const [accountToDelete, setAccountToDelete] = useState(null)
+  const [createErrorMessage, setCreateErrorMessage] = useState(null)
   const roleFilter = searchParams.get('role') || (user?.user_type === 'supervisor' ? 'supervisor' : '')
+  const createDefaultValues = {
+    username: '',
+    email: '',
+    full_name: '',
+    sex: '',
+    position: '',
+    password: '',
+    user_type: roleFilter === 'supervisor' ? 'supervisor' : 'admin',
+  }
 
   const createForm = useForm({
-    defaultValues: {
-      username: '',
-      email: '',
-      full_name: '',
-      sex: '',
-      position: '',
-      password: '',
-      user_type: roleFilter === 'supervisor' ? 'supervisor' : 'admin',
-    },
+    defaultValues: createDefaultValues,
   })
 
   const editForm = useForm({
@@ -43,6 +45,65 @@ export default function AdminAccounts() {
       is_active: true,
     },
   })
+
+  const getResponseErrorMessage = (payload, fallbackMessage) => {
+    const detail = payload?.detail
+
+    if (typeof detail === 'string') {
+      return detail
+    }
+
+    if (Array.isArray(detail) && detail.length > 0) {
+      const messages = detail
+        .map((item) => item?.msg || item?.message || item?.detail)
+        .filter(Boolean)
+
+      if (messages.length > 0) {
+        return messages.join(' ')
+      }
+    }
+
+    if (typeof payload?.message === 'string') {
+      return payload.message
+    }
+
+    return fallbackMessage
+  }
+
+  const getCreateValidationMessage = (errors) => {
+    return errors.full_name?.message
+      || errors.username?.message
+      || errors.email?.message
+      || errors.password?.message
+      || null
+  }
+
+  const registerCreateField = (fieldName, rules = {}) => {
+    const { onChange, ...validationRules } = rules
+
+    return createForm.register(fieldName, {
+      ...validationRules,
+      onChange: (event) => {
+        if (typeof onChange === 'function') {
+          onChange(event)
+        }
+        if (createErrorMessage) {
+          setCreateErrorMessage(null)
+        }
+      },
+    })
+  }
+
+  const closeCreateModal = () => {
+    setShowCreateModal(false)
+    setCreateErrorMessage(null)
+    createForm.reset(createDefaultValues)
+    createForm.clearErrors()
+  }
+
+  const handleCreateInvalid = (errors) => {
+    toast.error(getCreateValidationMessage(errors) || 'Please fill out all required fields.')
+  }
 
   const loadAccounts = async () => {
     setLoading(true)
@@ -87,14 +148,15 @@ export default function AdminAccounts() {
         body: JSON.stringify(values),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.detail || 'Failed to create account')
+      if (!response.ok) throw new Error(getResponseErrorMessage(data, 'Failed to create account'))
       toast.success('Account created successfully')
+      setCreateErrorMessage(null)
       cacheManager.clearPattern('accounts_list:')
       cacheManager.clearPattern('stats_')
-      setShowCreateModal(false)
-      createForm.reset()
+      closeCreateModal()
       loadAccounts()
     } catch (error) {
+      setCreateErrorMessage(error.message)
       toast.error(error.message)
     } finally {
       setIsProcessing(false)
@@ -134,7 +196,7 @@ export default function AdminAccounts() {
         body: JSON.stringify(payload),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.detail || 'Failed to update account')
+      if (!response.ok) throw new Error(getResponseErrorMessage(data, 'Failed to update account'))
       toast.success('Account updated successfully')
       cacheManager.clearPattern('accounts_list:')
       cacheManager.clearPattern('stats_')
@@ -156,7 +218,7 @@ export default function AdminAccounts() {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.detail || 'Failed to delete account')
+      if (!response.ok) throw new Error(getResponseErrorMessage(data, 'Failed to delete account'))
 
       toast.success('Account deleted successfully')
       cacheManager.clearPattern('accounts_list:')
@@ -189,7 +251,10 @@ export default function AdminAccounts() {
         {user?.user_type === 'admin' && (
           <button
             type="button"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              setCreateErrorMessage(null)
+              setShowCreateModal(true)
+            }}
             disabled={isProcessing}
             className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-sky-900/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -254,15 +319,21 @@ export default function AdminAccounts() {
       )}
 
       {showCreateModal && (
-        <ModalShell title="Create Management Account" onClose={() => setShowCreateModal(false)} maxWidth="max-w-xl">
-          <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
+        <ModalShell title="Create Management Account" onClose={closeCreateModal} maxWidth="max-w-xl">
+          <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate, handleCreateInvalid)}>
+            {(createErrorMessage || getCreateValidationMessage(createForm.formState.errors)) && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                {createErrorMessage || getCreateValidationMessage(createForm.formState.errors)}
+              </div>
+            )}
             <div>
               <label htmlFor="create_full_name" className="block text-sm font-semibold text-slate-700">Full Name</label>
-              <input id="create_full_name" {...createForm.register('full_name', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <input id="create_full_name" {...registerCreateField('full_name', { required: 'Full name is required' })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              {createForm.formState.errors.full_name?.message && <p className="mt-2 text-sm text-rose-600">{createForm.formState.errors.full_name.message}</p>}
             </div>
             <div>
               <label htmlFor="create_sex" className="block text-sm font-semibold text-slate-700">Sex</label>
-              <select id="create_sex" {...createForm.register('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+              <select id="create_sex" {...registerCreateField('sex')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
                 <option value="">Select sex</option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
@@ -271,29 +342,32 @@ export default function AdminAccounts() {
             </div>
             <div>
               <label htmlFor="create_position" className="block text-sm font-semibold text-slate-700">Position</label>
-              <input id="create_position" {...createForm.register('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <input id="create_position" {...registerCreateField('position')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
             </div>
             <div>
               <label htmlFor="create_username" className="block text-sm font-semibold text-slate-700">Username</label>
-              <input id="create_username" {...createForm.register('username', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <input id="create_username" {...registerCreateField('username', { required: 'Username is required' })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              {createForm.formState.errors.username?.message && <p className="mt-2 text-sm text-rose-600">{createForm.formState.errors.username.message}</p>}
             </div>
             <div>
               <label htmlFor="create_email" className="block text-sm font-semibold text-slate-700">Email</label>
-              <input id="create_email" type="email" {...createForm.register('email', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <input id="create_email" type="email" {...registerCreateField('email', { required: 'Email is required' })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              {createForm.formState.errors.email?.message && <p className="mt-2 text-sm text-rose-600">{createForm.formState.errors.email.message}</p>}
             </div>
             <div>
               <label htmlFor="create_password" className="block text-sm font-semibold text-slate-700">Password</label>
-              <input id="create_password" type="password" {...createForm.register('password', { required: true })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              <input id="create_password" type="password" {...registerCreateField('password', { required: 'Password is required' })} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+              {createForm.formState.errors.password?.message && <p className="mt-2 text-sm text-rose-600">{createForm.formState.errors.password.message}</p>}
             </div>
             <div>
               <label htmlFor="create_role" className="block text-sm font-semibold text-slate-700">Account Role</label>
-              <select id="create_role" {...createForm.register('user_type')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
+              <select id="create_role" {...registerCreateField('user_type')} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100">
                 <option value="admin">Admin</option>
                 <option value="supervisor">Center Chief</option>
               </select>
             </div>
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="button" onClick={closeCreateModal} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
               <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isProcessing ? 'Creating...' : 'Create Account'}</button>
             </div>
           </form>

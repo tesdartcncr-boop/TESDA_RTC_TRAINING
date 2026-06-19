@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user
+from ..activity_updates import log_trainer_activity
 from ..schemas import (
     AdminUserResponse,
     MessageCreate,
@@ -106,6 +107,17 @@ def _load_management_user_ids() -> set[int]:
         select="id",
     )
     return {user["id"] for user in admin_users + supervisor_users}
+
+
+def _load_trainer_by_user_id(user_id: int | None) -> dict | None:
+    if user_id is None:
+        return None
+
+    return select_one(
+        "trainers",
+        filters={"user_id": f"eq.{user_id}"},
+        select="id,user_id,username,trainer_name",
+    )
 
 
 async def _broadcast_message_event(event_type: str, message: dict, targets: set[int]):
@@ -294,6 +306,22 @@ async def create_message(
         # Insert the message
         result = insert_row("messages", message)
         await _broadcast_message_event("new_message", result, _message_event_targets(result))
+
+        if _normalize_user_type(current_user.get("user_type")) == "trainer":
+            trainer = _load_trainer_by_user_id(current_user.get("id"))
+            trainer_name = (trainer or {}).get("trainer_name") or current_user.get("full_name") or current_user.get("username") or "Trainer"
+            await log_trainer_activity(
+                actor_user_id=current_user.get("id"),
+                trainer_id=(trainer or {}).get("id"),
+                message_id=result.get("id"),
+                action_type="message_sent",
+                action_label="Message sent",
+                details=f"{trainer_name} sent a message: {message_data.subject}.",
+                metadata={
+                    "subject": message_data.subject,
+                    "recipient_id": message_data.recipient_id,
+                },
+            )
         
         return result
     except HTTPException:
@@ -333,6 +361,67 @@ async def get_unread_count(current_user: CurrentUser):
             select="id",
         )
         return {"count": len(unread_messages)}
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+
+
+@router.get("/updates")
+async def get_activity_updates(
+    current_user: CurrentUser,
+    limit: int = Query(100, ge=1, le=200),
+):
+    if _normalize_user_type(current_user.get("user_type")) not in MANAGEMENT_USER_TYPES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE)
+
+    try:
+        updates = select_rows(
+            "trainer_activity_updates",
+            order=ORDER_CREATED_AT_DESC,
+            limit=limit,
+        )
+
+        actor_ids = {update.get("actor_user_id") for update in updates if update.get("actor_user_id") is not None}
+        trainer_ids = {update.get("trainer_id") for update in updates if update.get("trainer_id") is not None}
+        program_ids = {update.get("program_id") for update in updates if update.get("program_id") is not None}
+
+        users_map = _load_users_map(actor_ids)
+        trainers_map = {}
+        programs_map = {}
+
+        if trainer_ids:
+            trainers = select_rows(
+                "trainers",
+                filters={"id": f"in.({','.join(map(str, sorted(trainer_ids)))})"},
+                select="id,trainer_name,username",
+            )
+            trainers_map = {trainer["id"]: trainer for trainer in trainers}
+
+        if program_ids:
+            programs = select_rows(
+                "programs",
+                filters={"id": f"in.({','.join(map(str, sorted(program_ids)))})"},
+                select="id,name,type",
+            )
+            programs_map = {program["id"]: program for program in programs}
+
+        enriched_updates = []
+        for update in updates:
+            actor = users_map.get(update.get("actor_user_id")) or _unknown_user()
+            trainer = trainers_map.get(update.get("trainer_id")) or {}
+            program = programs_map.get(update.get("program_id")) or {}
+            enriched_updates.append(
+                {
+                    **update,
+                    "actor_name": actor.get("full_name") or actor.get("username") or "Unknown",
+                    "actor_username": actor.get("username") or "unknown",
+                    "actor_user_type": _normalize_user_type(actor.get("user_type")),
+                    "trainer_name": trainer.get("trainer_name") or trainer.get("username"),
+                    "program_name": program.get("name"),
+                    "program_type": program.get("type"),
+                }
+            )
+
+        return {"data": enriched_updates}
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)
 
@@ -478,6 +567,22 @@ async def reply_to_message(
         original_message = {**original_message, "status": "replied"}
         await _broadcast_message_event("message_update", {**original_message, "event_type": "message_replied"}, _message_event_targets(original_message))
         await _broadcast_message_event("new_message", {**result, "event_type": "message_reply"}, _message_event_targets(result))
+        if _normalize_user_type(current_user.get("user_type")) == "trainer":
+            trainer = _load_trainer_by_user_id(current_user.get("id"))
+            trainer_name = (trainer or {}).get("trainer_name") or current_user.get("full_name") or current_user.get("username") or "Trainer"
+            await log_trainer_activity(
+                actor_user_id=current_user.get("id"),
+                trainer_id=(trainer or {}).get("id"),
+                message_id=result.get("id"),
+                action_type="message_sent",
+                action_label="Message reply sent",
+                details=f"{trainer_name} replied to a message: {original_message.get('subject') or '(No subject)'}.",
+                metadata={
+                    "subject": original_message.get("subject"),
+                    "reply_to_id": message_id,
+                    "recipient_id": recipient_id,
+                },
+            )
         return result
     except SupabaseAPIError as exc:
         raise_supabase_http(exc)

@@ -6,8 +6,8 @@ from .supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_row
 
 DEFAULT_HOURS_PER_DAY = 8
 VALID_HOURS_PER_DAY = {4, 8}
-VALID_STATUSES = {"complete", "absent", "leave", "suspended", "incomplete"}
-NON_COMPLETE_STATUSES = {"absent", "leave", "suspended", "incomplete"}
+VALID_STATUSES = {"complete", "absent", "nat", "leave", "suspended", "incomplete"}
+NON_COMPLETE_STATUSES = {"absent", "nat", "leave", "suspended", "incomplete"}
 IN_PROGRESS_STATUS = "in progress"
 
 
@@ -143,6 +143,37 @@ def load_schedule_rows(trainer_id: int, program_id: int) -> list[dict[str, Any]]
     )
 
 
+def mark_overdue_schedule_rows_nat(assignment: dict[str, Any] | None, schedule_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not assignment or assignment.get("approval_status") != "approved" or not schedule_rows:
+        return schedule_rows
+
+    today = date.today()
+    updated_at = datetime.now().isoformat()
+    normalized_rows: list[dict[str, Any]] = []
+
+    for row in schedule_rows:
+        schedule_date = parse_date(row.get("schedule_date"))
+        if row.get("status") or not schedule_date or schedule_date >= today:
+            normalized_rows.append(row)
+            continue
+
+        try:
+            updated_row = update_row(
+                "schedules",
+                {
+                    "status": "nat",
+                    "updated_at": updated_at,
+                },
+                filters={"id": f"eq.{row['id']}"},
+            ) or {**row, "status": "nat", "updated_at": updated_at}
+        except SupabaseAPIError:
+            updated_row = row
+
+        normalized_rows.append(updated_row)
+
+    return normalized_rows
+
+
 def load_users_map(user_ids: list[int] | set[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
     normalized_ids = sorted({int(user_id) for user_id in user_ids if user_id is not None})
     if not normalized_ids:
@@ -162,6 +193,7 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
     hours_per_day = get_assignment_hours_per_day(assignment, program)
     start_date = parse_date(assignment.get("schedule_date")) or date.today()
     existing_rows = load_schedule_rows(trainer_id, program_id)
+    existing_rows = mark_overdue_schedule_rows_nat(assignment, existing_rows)
 
     base_days = calculate_base_days(program, hours_per_day)
     non_complete_days = get_non_complete_day_count(existing_rows)
@@ -240,6 +272,7 @@ def build_assignment_summary(
         int(assignment["trainer_id"]),
         int(assignment["program_id"]),
     )
+    rows = mark_overdue_schedule_rows_nat(assignment, rows)
     if users_map is None:
         users_map = load_users_map(
             [assignment.get("assigned_by"), assignment.get("approved_by")]
@@ -287,4 +320,3 @@ def build_assignment_summary(
         "assigned_by_position": (assigned_user or {}).get("position"),
         "created_at": assignment.get("created_at"),
     }
-

@@ -4,6 +4,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .auth import get_current_user
+from ..activity_updates import log_trainer_activity
 from ..cache_manager import cache_manager
 from ..schedule_utils import (
     VALID_HOURS_PER_DAY,
@@ -29,15 +30,28 @@ CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
 def get_trainer_programs_cache_key(trainer_id: int) -> str:
-    return cache_manager.get_cache_key("schedules_trainer_programs", trainer_id=trainer_id)
+    return cache_manager.get_cache_key(
+        "schedules_trainer_programs",
+        trainer_id=trainer_id,
+        cache_day=date.today().isoformat(),
+    )
 
 
 def get_schedule_cache_key(trainer_id: int, program_id: int) -> str:
-    return cache_manager.get_cache_key("schedules_schedule", trainer_id=trainer_id, program_id=program_id)
+    return cache_manager.get_cache_key(
+        "schedules_schedule",
+        trainer_id=trainer_id,
+        program_id=program_id,
+        cache_day=date.today().isoformat(),
+    )
 
 
 def get_approval_queue_cache_key(approval_status: str | None) -> str:
-    return cache_manager.get_cache_key("approval_queue", approval_status=approval_status or "all")
+    return cache_manager.get_cache_key(
+        "approval_queue",
+        approval_status=approval_status or "all",
+        cache_day=date.today().isoformat(),
+    )
 
 
 def clear_schedule_caches():
@@ -267,6 +281,31 @@ async def create_or_update_schedule_day(
                 "data": result,
             }
         )
+
+        if current_user.get("user_type") == "trainer":
+            status_labels = {
+                "complete": "complete",
+                "absent": "absent",
+                "nat": "NAT",
+                "leave": "leave",
+                "suspended": "suspended",
+                "incomplete": "incomplete",
+            }
+            status_label = status_labels.get(request.status.value if request.status else None, "open")
+            await log_trainer_activity(
+                actor_user_id=current_user.get("id"),
+                trainer_id=trainer_id,
+                program_id=program_id,
+                schedule_id=result.get("id"),
+                action_type="schedule_status",
+                action_label="Day status updated",
+                details=f"{trainer.get('trainer_name') or trainer.get('username') or 'Trainer'} marked day {day_number} as {status_label}.",
+                metadata={
+                    "day_number": day_number,
+                    "status": request.status.value if request.status else None,
+                    "program_name": program.get("name"),
+                },
+            )
 
         return {"status": "updated", "data": result}
     except SupabaseAPIError as exc:

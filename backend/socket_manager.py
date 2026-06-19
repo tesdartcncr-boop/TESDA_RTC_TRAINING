@@ -185,6 +185,11 @@ async def broadcast_schedule_update(schedule_data):
         await sio.emit("schedule_update", schedule_data, room=room)
 
 
+async def broadcast_activity_update(activity_data):
+    logger.info("Broadcasting activity update %s", activity_data.get("action_type"))
+    await sio.emit("activity_update", activity_data, room="management")
+
+
 async def broadcast_trainer_update(trainer_data):
     target_rooms = {"management"}
     trainer_user_id = _normalize_user_id(trainer_data.get("user_id"))
