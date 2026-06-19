@@ -14,6 +14,7 @@ from ..schedule_utils import (
     load_users_map,
     parse_date,
     load_schedule_rows,
+    load_schedule_rows_map,
     sync_assignment_schedule,
 )
 from ..schemas import ScheduleHoursUpdate, ScheduleUpdate, TeachingLoadApprovalUpdate
@@ -27,6 +28,11 @@ TRAINER_SCHEDULE_CACHE_PATTERN = "trainer_schedule:.*"
 ADMIN_ACCESS_DENIED = "Access denied. Admin access required."
 ACCESS_DENIED = "Access denied."
 CurrentUser = Annotated[dict, Depends(get_current_user)]
+ASSIGNMENT_SUMMARY_SELECT = (
+    "id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,"
+    "assigned_by,approved_by,approved_at,created_at,updated_at,nttc_number,"
+    "schedule_date,assigned_by_signature_enabled"
+)
 
 
 def get_trainer_programs_cache_key(trainer_id: int) -> str:
@@ -151,6 +157,7 @@ async def get_trainer_programs_schedules(
             table="trainer_programs",
             filters=filters,
             order="created_at.desc",
+            select=ASSIGNMENT_SUMMARY_SELECT,
         )
 
         program_ids = {assignment["program_id"] for assignment in assignments if assignment.get("program_id") is not None}
@@ -175,6 +182,7 @@ async def get_trainer_programs_schedules(
             )
             programs_map = {program["id"]: program for program in programs}
 
+        schedule_rows_map = load_schedule_rows_map(assignments)
         result = []
         for assignment in assignments:
             program = programs_map.get(assignment["program_id"])
@@ -188,7 +196,7 @@ async def get_trainer_programs_schedules(
                     continue
                 raise
 
-            schedule_rows = load_schedule_rows(int(assignment["trainer_id"]), int(assignment["program_id"]))
+            schedule_rows = schedule_rows_map.get((int(assignment["trainer_id"]), int(assignment["program_id"])), [])
             result.append(build_assignment_summary(trainer, assignment, program, schedule_rows, users_map))
 
         if approval_status is None:
@@ -378,7 +386,7 @@ async def get_approval_queue(current_user: CurrentUser, approval_status: str | N
         if approval_status:
             filters["approval_status"] = f"eq.{approval_status}"
 
-        assignments = select_rows("trainer_programs", filters=filters, order="created_at.desc", select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,assigned_by,approved_by,approved_at,created_at")
+        assignments = select_rows("trainer_programs", filters=filters, order="created_at.desc", select=ASSIGNMENT_SUMMARY_SELECT)
         
         # Batch fetch trainers and programs
         trainer_ids = {a['trainer_id'] for a in assignments}
@@ -408,12 +416,13 @@ async def get_approval_queue(current_user: CurrentUser, approval_status: str | N
                 if assignment.get("approved_by") is not None
             }
         )
+        schedule_rows_map = load_schedule_rows_map(assignments)
         for assignment in assignments:
             trainer = trainers_map.get(assignment['trainer_id'])
             program = programs_map.get(assignment['program_id'])
             if not trainer or not program:
                 continue
-            schedule_rows = load_schedule_rows(int(assignment["trainer_id"]), int(assignment["program_id"]))
+            schedule_rows = schedule_rows_map.get((int(assignment["trainer_id"]), int(assignment["program_id"])), [])
             queue.append(build_assignment_summary(trainer, assignment, program, schedule_rows, users_map))
         cache_manager.set(cache_key, queue, 60000)
         return queue

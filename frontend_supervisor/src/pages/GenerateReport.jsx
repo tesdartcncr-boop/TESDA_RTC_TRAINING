@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckSquare, Download, FileText, Loader2, Search, Square, User2, Users } from 'lucide-react'
+import { CheckSquare, Download, FileText, Loader2, Search, Square, Upload, User2, Users } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
+import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
 import { getSocket } from '../utils/socket'
+import { lookupSignatures, readSignatureFile, saveMySignature } from '../utils/signatures'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
-const REPORT_CACHE_VERSION = 'v5'
+const REPORT_CACHE_VERSION = 'v6'
 
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
 
@@ -48,6 +51,8 @@ const loadApprovalLabel = (load) => {
 }
 
 const isApprovedLoad = (load) => load?.approval_status === 'approved'
+
+const getImageFormat = (dataUrl) => dataUrl?.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG'
 
 const toDataUrl = async (response) => {
   const blob = await response.blob()
@@ -95,6 +100,7 @@ const getTrainerSearchText = (trainer) => {
 }
 
 export default function GenerateReport() {
+  const { user } = useAuth()
   const [trainers, setTrainers] = useState([])
   const [selectedTrainerId, setSelectedTrainerId] = useState('')
   const [loads, setLoads] = useState([])
@@ -103,6 +109,9 @@ export default function GenerateReport() {
   const [loadingTrainers, setLoadingTrainers] = useState(true)
   const [loadingLoads, setLoadingLoads] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [signatureDialogOpen, setSignatureDialogOpen] = useState(false)
+  const [availableSignatures, setAvailableSignatures] = useState({})
+  const [signatureUpload, setSignatureUpload] = useState(null)
 
   const selectedTrainer = useMemo(
     () => trainers.find((trainer) => String(trainer.id) === String(selectedTrainerId)) || null,
@@ -188,19 +197,22 @@ export default function GenerateReport() {
         const approvedCachedLoads = cached.filter(isApprovedLoad)
         setLoads(approvedCachedLoads)
         setSelectedLoadIds(new Set(approvedCachedLoads.map((load) => load.id)))
-        return
       }
 
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs?approval_status=approved`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || 'Failed to load trainer loads')
+      }
       const data = await response.json()
       const nextLoads = Array.isArray(data) ? data : []
       const fallbackLoads = Array.isArray(data?.data) ? data.data : []
       const resolvedLoads = (nextLoads.length > 0 ? nextLoads : fallbackLoads).filter(isApprovedLoad)
       setLoads(resolvedLoads)
       setSelectedLoadIds(new Set(resolvedLoads.map((load) => load.id)))
-      cacheManager.set(cacheKey, resolvedLoads)
+      cacheManager.set(cacheKey, resolvedLoads, 60000)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load trainer loads')
@@ -264,6 +276,72 @@ export default function GenerateReport() {
     setSelectedLoadIds(new Set(enabled ? loads.map((load) => load.id) : []))
   }
 
+  const getSelectedSignerIds = () => Array.from(new Set(
+    selectedLoads
+      .flatMap((load) => [
+        load.assigned_by_signature_enabled ? load.assigned_by : null,
+        load.approved_by,
+      ])
+      .filter(Boolean)
+      .map((userId) => Number.parseInt(userId, 10))
+      .filter((userId) => Number.isFinite(userId)),
+  ))
+
+  const openSignatureDialog = async () => {
+    if (!selectedTrainer) {
+      toast.error('Please select a trainer first')
+      return
+    }
+
+    if (selectedLoads.length === 0) {
+      toast.error('Please select at least one load to include')
+      return
+    }
+
+    try {
+      const signatures = await lookupSignatures(API_BASE, getToken(), getSelectedSignerIds())
+      setAvailableSignatures(signatures)
+    } catch (error) {
+      console.error(error)
+      setAvailableSignatures({})
+    }
+    setSignatureUpload(null)
+    setSignatureDialogOpen(true)
+  }
+
+  const handleReportSignatureFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const imageData = await readSignatureFile(file)
+      setSignatureUpload({ imageData, fileName: file.name })
+    } catch (error) {
+      toast.error(error.message)
+      event.target.value = ''
+    }
+  }
+
+  const generateWithUploadedSignature = async () => {
+    if (!signatureUpload?.imageData) {
+      toast.error('Please choose a signature image first')
+      return
+    }
+
+    try {
+      const signature = await saveMySignature(API_BASE, getToken(), signatureUpload.imageData, signatureUpload.fileName)
+      const nextSignatures = {
+        ...availableSignatures,
+        ...(user?.id ? { [String(user.id)]: signature } : {}),
+      }
+      setAvailableSignatures(nextSignatures)
+      toast.success('Signature saved for future reports')
+      await generateReport(nextSignatures)
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
   const drawPdfHeader = async (doc, logoDataUrl, title, trainerName, trainerTmNumber, trainerPrograms) => {
     const pageWidth = doc.internal.pageSize.getWidth()
     const margin = 14
@@ -315,7 +393,7 @@ export default function GenerateReport() {
     return infoTop + infoHeight + 6
   }
 
-  const generateReport = async () => {
+  const generateReport = async (signaturesByUserId = {}) => {
     if (!selectedTrainer) {
       toast.error('Please select a trainer first')
       return
@@ -328,6 +406,7 @@ export default function GenerateReport() {
 
     setGenerating(true)
     try {
+      setSignatureDialogOpen(false)
       const doc = new jsPDF('p', 'mm', 'a4')
       const logo = await fetchTesdaLogo()
       const tableStartY = await drawPdfHeader(
@@ -381,22 +460,24 @@ export default function GenerateReport() {
       const pageHeight = doc.internal.pageSize.getHeight()
 
       // Aggregate unique prepared-by and approved-by pairs from selected loads
-      const uniqueList = (items, nameField, positionField) => {
+      const uniqueList = (items, userField, nameField, positionField, signatureEnabledField = null) => {
         const map = new Map()
         items.forEach((it) => {
+          const userId = it?.[userField] || null
           const name = it?.[nameField] || 'N/A'
           const position = it?.[positionField] || 'N/A'
-          const key = `${name}||${position}`
-          if (!map.has(key)) map.set(key, { name, position })
+          const key = userId ? String(userId) : `${name}||${position}`
+          const signatureEnabled = signatureEnabledField ? it?.[signatureEnabledField] === true : true
+          if (!map.has(key)) map.set(key, { userId, name, position, signatureEnabled })
         })
         return Array.from(map.values())
       }
 
-      const preparedList = uniqueList(selectedLoads, 'assigned_by_name', 'assigned_by_position')
-      const approvedList = uniqueList(selectedLoads, 'approved_by_name', 'approved_by_position')
+      const preparedList = uniqueList(selectedLoads, 'assigned_by', 'assigned_by_name', 'assigned_by_position', 'assigned_by_signature_enabled')
+      const approvedList = uniqueList(selectedLoads, 'approved_by', 'approved_by_name', 'approved_by_position')
 
       // Calculate block heights based on number of signatories (stack vertically if multiple)
-      const itemHeight = 22
+      const itemHeight = 30
       const preparedBlockHeight = Math.max(28, preparedList.length * itemHeight + 8)
       const approvedBlockHeight = Math.max(28, approvedList.length * itemHeight + 8)
       const blockHeight = Math.max(preparedBlockHeight, approvedBlockHeight)
@@ -423,7 +504,15 @@ export default function GenerateReport() {
 
           // draw signature line on top of the printed name to leave space for signing above
           doc.setDrawColor(100, 116, 139)
-          const lineY = itemTop + 4
+          const lineY = itemTop + 12
+          const signature = it.signatureEnabled ? signaturesByUserId[String(it.userId)]?.image_data : null
+          if (signature) {
+            try {
+              doc.addImage(signature, getImageFormat(signature), x + 10, lineY - 11, blockWidth - 20, 10, undefined, 'FAST')
+            } catch (error) {
+              console.error('Failed to draw signature image:', error)
+            }
+          }
           doc.line(x + 6, lineY, x + blockWidth - 6, lineY)
 
           // printed name and position below the signature line
@@ -434,8 +523,8 @@ export default function GenerateReport() {
         })
       }
 
-      renderSignatoryList(footerMargin, 'Prepared by', preparedList.length > 0 ? preparedList : [{ name: 'N/A', position: 'N/A' }])
-      renderSignatoryList(footerMargin + blockWidth + 8, 'Approved by', approvedList.length > 0 ? approvedList : [{ name: 'N/A', position: 'N/A' }])
+      renderSignatoryList(footerMargin, 'Prepared by', preparedList.length > 0 ? preparedList : [{ userId: null, name: 'N/A', position: 'N/A' }])
+      renderSignatoryList(footerMargin + blockWidth + 8, 'Approved by', approvedList.length > 0 ? approvedList : [{ userId: null, name: 'N/A', position: 'N/A' }])
 
       const fileName = `tesda-trainer-report-${slugify(selectedTrainerName)}.pdf`
       doc.save(fileName)
@@ -628,7 +717,7 @@ export default function GenerateReport() {
               </button>
               <button
                 type="button"
-                onClick={generateReport}
+                onClick={openSignatureDialog}
                 disabled={generating || loadingLoads || !selectedTrainer || selectedLoads.length === 0}
                 className="inline-flex items-center rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-sky-900/20 transition hover:from-sky-700 hover:to-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -643,6 +732,58 @@ export default function GenerateReport() {
           </div>
         </div>
       </section>
+
+      {signatureDialogOpen && (
+        <ModalShell title="Digital Signatures" onClose={() => setSignatureDialogOpen(false)} maxWidth="max-w-xl">
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-800">Saved signatures found: {Object.keys(availableSignatures).length}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Saved admin signatures are placed on Prepared by. Saved center chief signatures are placed on Approved by.
+              </p>
+            </div>
+
+            {signatureUpload?.imageData && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">New Signature Preview</p>
+                <img src={signatureUpload.imageData} alt="Signature preview" className="h-20 max-w-full object-contain" />
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => generateReport(availableSignatures)}
+                disabled={generating || Object.keys(availableSignatures).length === 0}
+                className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Use Existing Signatures
+              </button>
+              <label className="inline-flex cursor-pointer items-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                <Upload className="mr-2 h-4 w-4" />
+                Upload My Signature
+                <input type="file" accept="image/png,image/jpeg" onChange={handleReportSignatureFileChange} className="hidden" />
+              </label>
+              <button
+                type="button"
+                onClick={generateWithUploadedSignature}
+                disabled={generating || !signatureUpload?.imageData}
+                className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save and Generate
+              </button>
+              <button
+                type="button"
+                onClick={() => generateReport({})}
+                disabled={generating}
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Generate Without Digital Signatures
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .auth import get_current_user, get_password_hash
 from .schedules import clear_schedule_caches
 from ..cache_manager import cache_manager
-from ..schedule_utils import build_assignment_summary, is_expired_date, sync_assignment_schedule
+from ..schedule_utils import build_assignment_summary, is_expired_date, load_schedule_rows_map, sync_assignment_schedule
 from ..schemas import (
     TeachingLoadCreate,
     TeachingLoadResponse,
@@ -29,6 +29,11 @@ QUALIFICATIONS_CACHE_PATTERN = "trainer_qualifications:*"
 SCHEDULES_CACHE_PATTERN = "schedules:*"
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 ORDER_TRAINER_NAME_ASC = "trainer_name.asc,username.asc"
+ASSIGNMENT_SUMMARY_SELECT = (
+    "id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,"
+    "assigned_by,approved_by,approved_at,created_at,updated_at,nttc_number,"
+    "schedule_date,assigned_by_signature_enabled"
+)
 
 
 def raise_supabase_http(exc: SupabaseAPIError):
@@ -554,6 +559,7 @@ async def assign_program_to_trainer(
                 "approval_status": "for approval",
                 "nttc_number": assignment.nttc_number or qualification.get("nttc_number"),
                 "schedule_date": schedule_date,
+                "assigned_by_signature_enabled": assignment.use_digital_signature,
             },
         )
         synced_rows = sync_assignment_schedule(assignment_row, program)
@@ -590,7 +596,7 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
             "trainer_programs",
             filters={"trainer_id": f"eq.{trainer_id}"},
             order="created_at.desc",
-            select="id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,assigned_by,approved_by,approved_at,created_at"
+            select=ASSIGNMENT_SUMMARY_SELECT,
         )
 
         # Batch fetch all programs at once
@@ -600,6 +606,7 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
             programs = select_rows("programs", filters={"id": f"in.({','.join(map(str, program_ids))})"})
             programs_map = {p['id']: p for p in programs}
 
+        schedule_rows_map = load_schedule_rows_map(assignments)
         result = []
         for assignment in assignments:
             program = programs_map.get(assignment['program_id'])
@@ -607,7 +614,12 @@ async def get_trainer_programs(trainer_id: int, current_user: CurrentUser):
                 continue
             result.append(
                 {
-                    **build_assignment_summary(trainer, assignment, program),
+                    **build_assignment_summary(
+                        trainer,
+                        assignment,
+                        program,
+                        schedule_rows_map.get((int(assignment["trainer_id"]), int(assignment["program_id"])), []),
+                    ),
                     "program": program,
                 }
             )

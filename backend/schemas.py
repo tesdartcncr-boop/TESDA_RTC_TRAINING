@@ -236,6 +236,7 @@ class TeachingLoadCreate(BaseModel):
     nttc_number: Optional[str] = None
     schedule_date: Optional[date] = None
     batch: Optional[str] = None
+    use_digital_signature: bool = False
 
 
 class TeachingLoadApprovalUpdate(BaseModel):
@@ -256,6 +257,7 @@ class TeachingLoadResponse(BaseModel):
     nttc_number: Optional[str] = None
     schedule_date: Optional[date] = None
     batch: Optional[str] = None
+    assigned_by_signature_enabled: bool = False
     created_at: datetime
 
     class Config:

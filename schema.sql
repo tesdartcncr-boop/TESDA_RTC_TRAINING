@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     approved_at TIMESTAMP,
     nttc_number VARCHAR(50),
     schedule_date DATE,
+    assigned_by_signature_enabled BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(trainer_id, program_id)
@@ -138,6 +139,18 @@ CREATE TABLE IF NOT EXISTS verified_admin_emails (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Reusable digital signatures for admin and center chief report signatories.
+-- Signature images are normalized by the app to compact PNG data URLs.
+CREATE TABLE IF NOT EXISTS user_signatures (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    image_data TEXT NOT NULL,
+    mime_type VARCHAR(50) NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
+    file_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -151,6 +164,8 @@ CREATE INDEX IF NOT EXISTS idx_trainer_qualifications_trainer_id ON trainer_qual
 CREATE INDEX IF NOT EXISTS idx_trainer_qualifications_program_id ON trainer_qualifications(program_id);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_trainer_id ON trainer_programs(trainer_id);
 CREATE INDEX IF NOT EXISTS idx_trainer_programs_program_id ON trainer_programs(program_id);
+CREATE INDEX IF NOT EXISTS idx_trainer_programs_trainer_approval ON trainer_programs(trainer_id, approval_status);
+CREATE INDEX IF NOT EXISTS idx_trainer_programs_approval_created ON trainer_programs(approval_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedules_trainer_id ON schedules(trainer_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_program_id ON schedules(program_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_trainer_program ON schedules(trainer_id, program_id);
@@ -158,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_email ON otp_verifications(email);
 CREATE INDEX IF NOT EXISTS idx_otp_verifications_purpose ON otp_verifications(purpose);
 CREATE INDEX IF NOT EXISTS idx_verified_admin_emails_email ON verified_admin_emails(email);
+CREATE INDEX IF NOT EXISTS idx_user_signatures_user_id ON user_signatures(user_id);
 
 -- ============================================================================
 -- MIGRATION: Add missing columns to existing tables (fixes for existing setups)
@@ -206,6 +222,9 @@ ADD COLUMN IF NOT EXISTS nttc_number VARCHAR(50);
 
 ALTER TABLE IF EXISTS trainer_programs
 ADD COLUMN IF NOT EXISTS batch VARCHAR(50);
+
+ALTER TABLE IF EXISTS trainer_programs
+ADD COLUMN IF NOT EXISTS assigned_by_signature_enabled BOOLEAN DEFAULT false;
 
 ALTER TABLE IF EXISTS trainer_programs
 ALTER COLUMN assigned_by DROP NOT NULL;
@@ -290,6 +309,19 @@ DROP CONSTRAINT IF EXISTS programs_type_check; -- keep drop for safety; do not r
 
 ALTER TABLE IF EXISTS otp_verifications
 ADD COLUMN IF NOT EXISTS purpose VARCHAR(30) NOT NULL DEFAULT 'password_reset';
+
+-- Add reusable digital signatures table when migrating an existing setup
+CREATE TABLE IF NOT EXISTS user_signatures (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    image_data TEXT NOT NULL,
+    mime_type VARCHAR(50) NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
+    file_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_signatures_user_id ON user_signatures(user_id);
 
 -- ============================================================================
 -- Verification: Check schedules table structure

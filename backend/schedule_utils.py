@@ -143,6 +143,36 @@ def load_schedule_rows(trainer_id: int, program_id: int) -> list[dict[str, Any]]
     )
 
 
+def load_schedule_rows_map(assignments: list[dict[str, Any]]) -> dict[tuple[int, int], list[dict[str, Any]]]:
+    pairs = {
+        (int(assignment["trainer_id"]), int(assignment["program_id"]))
+        for assignment in assignments
+        if assignment.get("trainer_id") is not None and assignment.get("program_id") is not None
+    }
+    if not pairs:
+        return {}
+
+    trainer_ids = sorted({trainer_id for trainer_id, _program_id in pairs})
+    program_ids = sorted({program_id for _trainer_id, program_id in pairs})
+    rows = select_rows(
+        "schedules",
+        filters={
+            "trainer_id": f"in.({','.join(map(str, trainer_ids))})",
+            "program_id": f"in.({','.join(map(str, program_ids))})",
+            "day_number": "gt.0",
+        },
+        order="trainer_id.asc,program_id.asc,day_number.asc",
+    )
+
+    grouped: dict[tuple[int, int], list[dict[str, Any]]] = {pair: [] for pair in pairs}
+    for row in rows:
+        key = (int(row["trainer_id"]), int(row["program_id"]))
+        if key in grouped:
+            grouped[key].append(row)
+
+    return grouped
+
+
 def mark_overdue_schedule_rows_nat(assignment: dict[str, Any] | None, schedule_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not assignment or assignment.get("approval_status") != "approved" or not schedule_rows:
         return schedule_rows
@@ -318,5 +348,6 @@ def build_assignment_summary(
         "assigned_by": assignment.get("assigned_by"),
         "assigned_by_name": (assigned_user or {}).get("full_name") or (assigned_user or {}).get("username"),
         "assigned_by_position": (assigned_user or {}).get("position"),
+        "assigned_by_signature_enabled": assignment.get("assigned_by_signature_enabled") is True,
         "created_at": assignment.get("created_at"),
     }

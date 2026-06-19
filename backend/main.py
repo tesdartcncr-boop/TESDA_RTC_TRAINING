@@ -9,13 +9,13 @@ from fastapi.responses import FileResponse
 from socketio import ASGIApp
 
 try:
-    from .routers import auth, trainers, programs, admin, schedules, messages
+    from .routers import auth, trainers, programs, admin, schedules, messages, signatures
     from .socket_manager import sio
 except ImportError:
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from backend.routers import auth, trainers, programs, admin, schedules, messages
+    from backend.routers import auth, trainers, programs, admin, schedules, messages, signatures
     from backend.socket_manager import sio
 
 @asynccontextmanager
@@ -73,6 +73,7 @@ fastapi_app.include_router(schedules.router, prefix="/api/schedules", tags=["sch
 fastapi_app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 fastapi_app.include_router(messages.router, prefix="/api/messages", tags=["messaging"])
 fastapi_app.include_router(messages.admin_router, tags=["messaging"])
+fastapi_app.include_router(signatures.router, prefix="/api/signatures", tags=["signatures"])
 
 @fastapi_app.get("/")
 async def root():

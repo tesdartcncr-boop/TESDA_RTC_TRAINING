@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { CalendarDays, CheckCircle2, Clock3, Plus, XCircle } from 'lucide-react'
+import { CalendarDays, CheckCircle2, Clock3, Plus, Upload, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ModalShell from '../components/ModalShell'
 import { cacheManager } from '../utils/cacheManager'
 import { getSocket, registerUser } from '../utils/socket'
+import { fetchMySignature, readSignatureFile, saveMySignature } from '../utils/signatures'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const STATUS_COLORS = {
@@ -89,6 +90,9 @@ export default function Schedules() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [savedSignature, setSavedSignature] = useState(null)
+  const [signatureChoice, setSignatureChoice] = useState('none')
+  const [signatureUpload, setSignatureUpload] = useState(null)
 
   const createForm = useForm({
     defaultValues: {
@@ -130,6 +134,43 @@ export default function Schedules() {
       toast.error('Failed to load teaching loads')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const closeCreateModal = () => {
+    setShowCreateModal(false)
+    setAssignmentWarning(null)
+    setSignatureUpload(null)
+    setSignatureChoice(savedSignature ? 'existing' : 'none')
+  }
+
+  useEffect(() => {
+    if (!showCreateModal) return
+
+    const loadSignature = async () => {
+      try {
+        const signature = await fetchMySignature(API_BASE, getToken())
+        setSavedSignature(signature)
+        setSignatureChoice(signature ? 'existing' : 'none')
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    loadSignature()
+  }, [showCreateModal])
+
+  const handleSignatureFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const imageData = await readSignatureFile(file)
+      setSignatureUpload({ imageData, fileName: file.name })
+      setSignatureChoice('upload')
+    } catch (error) {
+      toast.error(error.message)
+      event.target.value = ''
     }
   }
 
@@ -397,6 +438,14 @@ export default function Schedules() {
 
     setIsProcessing(true)
     try {
+      if (signatureChoice === 'upload' && signatureUpload?.imageData) {
+        const signature = await saveMySignature(API_BASE, getToken(), signatureUpload.imageData, signatureUpload.fileName)
+        setSavedSignature(signature)
+        setSignatureUpload(null)
+        setSignatureChoice('existing')
+        toast.success('Signature saved for future reports')
+      }
+
       const response = await fetch(`${API_BASE}/api/trainers/${values.trainer_id}/programs`, {
         method: 'POST',
         headers: {
@@ -408,6 +457,7 @@ export default function Schedules() {
           hours_per_day: Number.parseInt(values.hours_per_day, 10),
           schedule_date: values.schedule_date || null,
           batch: values.batch || null,
+          use_digital_signature: signatureChoice !== 'none',
         }),
       })
       if (!response.ok) {
@@ -428,7 +478,7 @@ export default function Schedules() {
         batch: '',
       })
       setEligiblePrograms([])
-      setShowCreateModal(false)
+      closeCreateModal()
       loadAssignments(true)
     } catch (error) {
       toast.error(error.message)
@@ -652,7 +702,7 @@ export default function Schedules() {
       </div>
 
       {showCreateModal && (
-        <ModalShell title="Create Teaching Load" onClose={() => { setShowCreateModal(false); setAssignmentWarning(null) }} maxWidth="max-w-5xl">
+        <ModalShell title="Create Teaching Load" onClose={closeCreateModal} maxWidth="max-w-5xl">
           <form className="space-y-4" onSubmit={createForm.handleSubmit(handleCreate)}>
             <div>
               <label htmlFor="teaching_load_trainer" className="block text-sm font-semibold text-slate-700">Trainer</label>
@@ -694,11 +744,65 @@ export default function Schedules() {
               <label htmlFor="teaching_load_batch" className="block text-sm font-semibold text-slate-700">Batch</label>
               <input id="teaching_load_batch" type="text" {...createForm.register('batch')} placeholder="yyyy-batch" className={`${fieldClassName} mt-2`} />
             </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Digital Signature</p>
+                  <p className="text-xs text-slate-500">Optional. Saved to your account and reused on generated reports.</p>
+                </div>
+                {savedSignature && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSignatureChoice('existing')
+                      setSignatureUpload(null)
+                    }}
+                    className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                      signatureChoice === 'existing'
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Use Existing Signature
+                  </button>
+                )}
+              </div>
+              {(signatureUpload?.imageData || savedSignature?.image_data) && signatureChoice !== 'none' && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <img
+                    src={signatureUpload?.imageData || savedSignature?.image_data}
+                    alt="Signature preview"
+                    className="h-16 max-w-full object-contain"
+                  />
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <label className="inline-flex cursor-pointer items-center rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Upload Signature
+                  <input type="file" accept="image/png,image/jpeg" onChange={handleSignatureFileChange} className="hidden" />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSignatureChoice('none')
+                    setSignatureUpload(null)
+                  }}
+                  className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                    signatureChoice === 'none'
+                      ? 'bg-slate-800 text-white'
+                      : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Do Not Use Digital Signature
+                </button>
+              </div>
+            </div>
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
               The calendar is generated automatically using weekdays only. New extra days are added when a day is marked absent, NAT, leave, suspended, or incomplete.
             </div>
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button type="button" onClick={closeCreateModal} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
               <button type="submit" disabled={isProcessing} className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isProcessing ? 'Processing...' : 'Assign Load'}</button>
             </div>
           </form>
