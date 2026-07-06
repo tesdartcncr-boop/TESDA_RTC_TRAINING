@@ -265,7 +265,12 @@ export default function TeachingLoads() {
   }
 
   const refreshTeachingLoadCaches = useCallback(async () => {
-    cacheManager.clearPattern('teaching_loads_|program_teaching_loads|trainer_teaching_loads|all_teaching_loads_combined|schedules_trainer_programs|schedules_schedule')
+    cacheManager.clearPattern('teaching_loads_')
+    cacheManager.clearPattern('program_teaching_loads:')
+    cacheManager.clearPattern('trainer_teaching_loads:')
+    cacheManager.clearPattern('all_teaching_loads_combined')
+    cacheManager.clearPattern('schedules_trainer_programs:')
+    cacheManager.clearPattern('schedules_schedule:')
     await loadAllTeachingLoads()
   }, [loadAllTeachingLoads])
 
@@ -475,7 +480,7 @@ export default function TeachingLoads() {
               placeholder={`Search ${viewMode === 'programs' ? 'programs' : 'trainers'}...`}
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100 lg:w-80"
+              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100 lg:w-80"
             />
           </div>
         </div>
@@ -882,28 +887,154 @@ function TrainersView({
   )
 }
 
-// Read-Only Calendar View Component
+// Editable Calendar View Component
 function ReadOnlyCalendarView({ teachingLoad }) {
+  const [loadDetail, setLoadDetail] = useState(teachingLoad)
   const [scheduleDays, setScheduleDays] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Edit config states
+  const [isEditingConfig, setIsEditingConfig] = useState(false)
+  const [editHoursPerDay, setEditHoursPerDay] = useState(teachingLoad.hours_per_day || 8)
+  const [editAllowedDays, setEditAllowedDays] = useState(teachingLoad.allowed_days || [0, 1, 2, 3, 4])
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
+
+  // Confirm custom add/remove states
+  const [dateToConfirmAdd, setDateToConfirmAdd] = useState(null)
+  const [isAddingCustomDate, setIsAddingCustomDate] = useState(false)
+  const [dateToConfirmRemove, setDateToConfirmRemove] = useState(null)
+  const [isRemovingCustomDate, setIsRemovingCustomDate] = useState(false)
+
+  const [errorMsg, setErrorMsg] = useState('')
+
   useEffect(() => {
-    const loadSchedule = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/schedules/trainer/${teachingLoad.trainer_id}/program/${teachingLoad.program_id}/schedule`, {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        })
-        const data = await response.json()
-        setScheduleDays(Array.isArray(data) ? data : [])
-      } catch (error) {
-        console.error('Failed to load schedule:', error)
-        setScheduleDays([])
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadSchedule()
+    setLoadDetail(teachingLoad)
+    setEditHoursPerDay(teachingLoad.hours_per_day || 8)
+    setEditAllowedDays(teachingLoad.allowed_days || [0, 1, 2, 3, 4])
   }, [teachingLoad])
+
+  const loadSchedule = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${loadDetail.trainer_id}/program/${loadDetail.program_id}/schedule`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      setScheduleDays(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Failed to load schedule:', error)
+      setScheduleDays([])
+    } finally {
+      setLoading(false)
+    }
+  }, [loadDetail.trainer_id, loadDetail.program_id])
+
+  useEffect(() => {
+    loadSchedule()
+  }, [loadSchedule])
+
+  const handleSaveConfig = async () => {
+    if (editHoursPerDay < 1 || editHoursPerDay > 24) {
+      setErrorMsg('Hours per day must be between 1 and 24')
+      return
+    }
+    if (editAllowedDays.length === 0) {
+      setErrorMsg('Please select at least one schedule day')
+      return
+    }
+
+    try {
+      setIsSavingConfig(true)
+      setErrorMsg('')
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${loadDetail.trainer_id}/program/${loadDetail.program_id}/schedule-config`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          hours_per_day: editHoursPerDay,
+          allowed_days: editAllowedDays,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update schedule config')
+      }
+
+      const updatedDetail = await response.json()
+      setLoadDetail(updatedDetail)
+      setIsEditingConfig(false)
+      await loadSchedule()
+    } catch (err) {
+      setErrorMsg(err.message)
+    } finally {
+      setIsSavingConfig(false)
+    }
+  }
+
+  const handleAddCustomDate = async () => {
+    if (!dateToConfirmAdd) return
+
+    try {
+      setIsAddingCustomDate(true)
+      setErrorMsg('')
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${loadDetail.trainer_id}/program/${loadDetail.program_id}/custom-date`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          date: dateToConfirmAdd,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to add custom date')
+      }
+
+      const updatedDetail = await response.json()
+      setLoadDetail(updatedDetail)
+      setDateToConfirmAdd(null)
+      await loadSchedule()
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setIsAddingCustomDate(false)
+    }
+  }
+
+  const handleRemoveCustomDate = async () => {
+    if (!dateToConfirmRemove) return
+
+    try {
+      setIsRemovingCustomDate(true)
+      setErrorMsg('')
+      const response = await fetch(`${API_BASE}/api/schedules/trainer/${loadDetail.trainer_id}/program/${loadDetail.program_id}/custom-date/${dateToConfirmRemove}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to remove custom date')
+      }
+
+      const updatedDetail = await response.json()
+      setLoadDetail(updatedDetail)
+      setDateToConfirmRemove(null)
+      await loadSchedule()
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setIsRemovingCustomDate(false)
+    }
+  }
 
   const STATUS_OPTIONS = [
     { key: 'complete', label: 'Complete', color: 'bg-emerald-500' },
@@ -973,9 +1104,6 @@ function ReadOnlyCalendarView({ teachingLoad }) {
     return weeks
   }
 
-  const calendarDays = Math.max(teachingLoad.program_days || 0, scheduleDays.length)
-  const dayMap = useMemo(() => Object.fromEntries(scheduleDays.map((day) => [day.day_number, day])), [scheduleDays])
-
   if (loading) {
     return (
       <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-500">
@@ -989,9 +1117,21 @@ function ReadOnlyCalendarView({ teachingLoad }) {
       <div className="flex items-center gap-3">
         <CalendarDays className="h-6 w-6 text-cyan-600" />
         <div>
-          <h3 className="text-xl font-bold text-slate-900">{teachingLoad.program_name}</h3>
-          <p className="text-sm text-slate-600">{teachingLoad.program_type} • {teachingLoad.hours_per_day} hrs/day</p>
+          <h3 className="text-xl font-bold text-slate-900">{loadDetail.program_name}</h3>
+          <p className="text-sm text-slate-600">{loadDetail.program_type} • {loadDetail.hours_per_day} hrs/day</p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setEditHoursPerDay(loadDetail.hours_per_day || 8)
+            setEditAllowedDays(loadDetail.allowed_days || [0, 1, 2, 3, 4])
+            setErrorMsg('')
+            setIsEditingConfig(true)
+          }}
+          className="ml-auto flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+        >
+          Edit Schedule Settings
+        </button>
       </div>
 
       <div className="overflow-x-auto">
@@ -1022,9 +1162,11 @@ function ReadOnlyCalendarView({ teachingLoad }) {
                       day: 'numeric'
                     })
                     return (
-                      <div 
+                      <button 
+                        type="button"
                         key={cell.dateStr} 
-                        className="aspect-square rounded-lg border border-slate-100 p-2 text-center flex flex-col justify-between bg-slate-50/50"
+                        onClick={() => setDateToConfirmAdd(cell.dateStr)}
+                        className="aspect-square rounded-lg border border-slate-100 p-2 text-center flex flex-col justify-between bg-slate-50/50 hover:bg-cyan-50/40 hover:border-cyan-200 transition-all cursor-pointer w-full text-left"
                       >
                         <div className="opacity-40">
                           <p className="text-[10px] font-bold text-slate-400">{cell.dayName}</p>
@@ -1032,28 +1174,45 @@ function ReadOnlyCalendarView({ teachingLoad }) {
                         </div>
                         <div className="flex justify-center my-1 opacity-20">
                           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-slate-400 bg-slate-200">
-                            -
+                            +
                           </span>
                         </div>
                         <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400 opacity-40">
                           Off Day
                         </p>
-                      </div>
+                      </button>
                     )
                   }
                   
                   const entry = cell.entry
                   const status = entry?.status
                   const color = getStatusOption(status)?.color || 'bg-slate-300'
+                  const isCustom = entry?.is_custom === true
                   
                   return (
                     <div
                       key={cell.dateStr}
-                      className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center flex flex-col justify-between"
+                      onClick={() => {
+                        if (isCustom) {
+                          setDateToConfirmRemove(cell.dateStr)
+                        }
+                      }}
+                      className={`aspect-square bg-white border rounded-lg p-2 text-center flex flex-col justify-between transition-all ${
+                        isCustom 
+                          ? 'border-cyan-300 shadow-sm cursor-pointer hover:bg-rose-50 hover:border-rose-300' 
+                          : 'border-slate-200'
+                      }`}
                     >
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
-                        <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                      <div className="flex justify-between items-start text-left">
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
+                          <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                        </div>
+                        {isCustom && (
+                          <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-cyan-700 leading-none">
+                            Remedial
+                          </span>
+                        )}
                       </div>
                       <div className="flex justify-center my-1">
                         <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
@@ -1084,6 +1243,161 @@ function ReadOnlyCalendarView({ teachingLoad }) {
           ))}
         </div>
       </div>
+
+      {/* Edit Config Modal */}
+      {isEditingConfig && (
+        <ModalShell
+          title="Edit Schedule Settings"
+          onClose={() => setIsEditingConfig(false)}
+          maxWidth="max-w-xl"
+        >
+          <div className="space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Hours per Day</label>
+              <input
+                type="number"
+                min="1"
+                max="24"
+                value={editHoursPerDay}
+                onChange={(e) => setEditHoursPerDay(parseInt(e.target.value) || 8)}
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Schedule Work Days</label>
+              <div className="flex flex-wrap gap-2">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((dayName, idx) => {
+                  const isActive = editAllowedDays.includes(idx)
+                  return (
+                    <button
+                      key={dayName}
+                      type="button"
+                      onClick={() => {
+                        if (isActive) {
+                          setEditAllowedDays(editAllowedDays.filter((d) => d !== idx))
+                        } else {
+                          setEditAllowedDays([...editAllowedDays, idx])
+                        }
+                      }}
+                      className={`rounded-full px-4 py-2 text-xs font-bold transition-all ${
+                        isActive
+                          ? 'bg-cyan-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {dayName}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 text-xs space-y-1">
+              <p className="font-bold">⚠️ Warning</p>
+              <p>
+                Changing schedule days or hours per day will recalculate all class dates. 
+                Any previously marked days may be shifted, unmarked, or removed depending on the new schedule structure.
+              </p>
+            </div>
+
+            {errorMsg && (
+              <p className="text-sm font-semibold text-rose-600">{errorMsg}</p>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsEditingConfig(false)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                disabled={isSavingConfig}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveConfig}
+                className="rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 transition"
+                disabled={isSavingConfig}
+              >
+                {isSavingConfig ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {/* Add Custom Date Modal */}
+      {dateToConfirmAdd && (
+        <ModalShell
+          title="Schedule Remedial/Meeting Class"
+          onClose={() => setDateToConfirmAdd(null)}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Do you want to add a remedial/meeting class on <strong className="text-slate-900">{new Date(`${dateToConfirmAdd}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</strong>?
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              Note: This remedial class will count towards the program hours, so the last class day of the regular schedule will be removed to keep the total hours from exceeding the program limit.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDateToConfirmAdd(null)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                disabled={isAddingCustomDate}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddCustomDate}
+                className="rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 transition"
+                disabled={isAddingCustomDate}
+              >
+                {isAddingCustomDate ? 'Adding...' : 'Add Class'}
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {/* Remove Custom Date Modal */}
+      {dateToConfirmRemove && (
+        <ModalShell
+          title="Remove Remedial/Meeting Class"
+          onClose={() => setDateToConfirmRemove(null)}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Are you sure you want to remove the remedial/meeting class scheduled on <strong className="text-slate-900">{new Date(`${dateToConfirmRemove}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</strong>?
+            </p>
+            <p className="text-xs text-slate-500">
+              Removing this date will shift the remaining schedule classes back to regular weekdays.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDateToConfirmRemove(null)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                disabled={isRemovingCustomDate}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveCustomDate}
+                className="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 transition"
+                disabled={isRemovingCustomDate}
+              >
+                {isRemovingCustomDate ? 'Removing...' : 'Remove Class'}
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }

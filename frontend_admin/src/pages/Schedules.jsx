@@ -321,7 +321,7 @@ export default function Schedules() {
   }
 
   useEffect(() => {
-    loadAssignments(true)
+    loadAssignments(false)
   }, [statusFilter])
 
   useEffect(() => {

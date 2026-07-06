@@ -676,7 +676,7 @@ export default function GenerateReport() {
               value={trainerSearch}
               onChange={(event) => setTrainerSearch(event.target.value)}
               placeholder="Search trainer"
-              className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-black outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
             />
           </div>
 

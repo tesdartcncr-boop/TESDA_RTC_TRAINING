@@ -13,7 +13,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 
-const inputClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const inputClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
 const formatDateOnly = (value) => (value ? String(value).split('T')[0] : '')
 
 const emptyTrainerValues = {
@@ -260,15 +260,13 @@ export default function Trainers() {
     cacheManager.clearPattern('admin_history')
   }
 
-  const loadTrainers = useCallback(async () => {
+  const loadTrainers = useCallback(async (forceRefresh = false) => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('trainers_list', { search: searchTerm })
-      const cached = cacheManager.get(cacheKey)
+      const cached = forceRefresh ? null : cacheManager.get(cacheKey)
       if (cached !== null) {
         setTrainers(cached)
-        setLoading(false)
-        return
       }
 
       const response = await fetch(`${API_BASE}/api/trainers/?skip=0&limit=100&search=${encodeURIComponent(searchTerm)}`, {
@@ -286,13 +284,12 @@ export default function Trainers() {
     }
   }, [searchTerm])
 
-  const loadPrograms = useCallback(async () => {
+  const loadPrograms = useCallback(async (forceRefresh = false) => {
     try {
       const cacheKey = cacheManager.generateKey('programs_list', { search: null })
-      const cached = cacheManager.get(cacheKey)
+      const cached = forceRefresh ? null : cacheManager.get(cacheKey)
       if (cached !== null) {
         setPrograms(cached)
-        return
       }
 
       const response = await fetch(`${API_BASE}/api/programs/?skip=0&limit=100`, {

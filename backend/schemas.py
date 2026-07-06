@@ -277,6 +277,15 @@ class ScheduleHoursUpdate(BaseModel):
     hours_per_day: int
 
 
+class ScheduleConfigUpdate(BaseModel):
+    hours_per_day: int
+    allowed_days: list[int]
+
+
+class CustomDateRequest(BaseModel):
+    date: str
+
+
 class NotificationCreate(BaseModel):
     user_id: int
     title: str

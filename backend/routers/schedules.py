@@ -17,7 +17,7 @@ from ..schedule_utils import (
     load_schedule_rows_map,
     sync_assignment_schedule,
 )
-from ..schemas import ScheduleHoursUpdate, ScheduleUpdate, TeachingLoadApprovalUpdate
+from ..schemas import ScheduleConfigUpdate, CustomDateRequest, ScheduleHoursUpdate, ScheduleUpdate, TeachingLoadApprovalUpdate
 from ..socket_manager import broadcast_schedule_update, send_notification_to_user
 from ..supabase_rest import SupabaseAPIError, delete_rows, get_public_error_message, select_one, select_rows, update_row
 
@@ -31,7 +31,7 @@ CurrentUser = Annotated[dict, Depends(get_current_user)]
 ASSIGNMENT_SUMMARY_SELECT = (
     "id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,"
     "assigned_by,approved_by,approved_at,created_at,updated_at,nttc_number,"
-    "schedule_date,assigned_by_signature_enabled"
+    "schedule_date,assigned_by_signature_enabled,allowed_days,custom_dates"
 )
 
 
@@ -370,6 +370,183 @@ async def update_assignment_hours_per_day(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put("/trainer/{trainer_id}/program/{program_id}/schedule-config")
+async def update_assignment_schedule_config(
+    trainer_id: int,
+    program_id: int,
+    request: ScheduleConfigUpdate,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    if request.hours_per_day < 1 or request.hours_per_day > 24:
+        raise HTTPException(status_code=400, detail="hours_per_day must be between 1 and 24")
+
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    try:
+        # Validate allowed_days contains days between 0 and 6
+        if not request.allowed_days or not all(isinstance(d, int) and 0 <= d <= 6 for d in request.allowed_days):
+            raise HTTPException(status_code=400, detail="allowed_days must contain integers between 0 (Monday) and 6 (Sunday)")
+
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        updated_assignment = update_row(
+            "trainer_programs",
+            {
+                "hours_per_day": request.hours_per_day,
+                "allowed_days": request.allowed_days,
+                "updated_at": datetime.now().isoformat(),
+            },
+            filters={"id": f"eq.{assignment['id']}"},
+        ) or assignment
+
+        synced_rows = sync_assignment_schedule(updated_assignment, program)
+        clear_schedule_caches()
+        summary = build_assignment_summary(trainer, updated_assignment, program, synced_rows)
+        cache_manager.clear_pattern(TRAINER_SCHEDULE_CACHE_PATTERN)
+
+        await broadcast_schedule_update(
+            {
+                "event_type": "schedule_config_updated",
+                "trainer_id": trainer_id,
+                "trainer_user_id": trainer.get("user_id"),
+                "program_id": program_id,
+                "hours_per_day": request.hours_per_day,
+                "allowed_days": request.allowed_days,
+                "data": summary,
+            }
+        )
+        return summary
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/trainer/{trainer_id}/program/{program_id}/custom-date")
+async def add_custom_date(
+    trainer_id: int,
+    program_id: int,
+    request: CustomDateRequest,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    # Validate date string
+    parsed_req_date = parse_date(request.date)
+    if not parsed_req_date:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    try:
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        
+        # Check if already in standard allowed days
+        allowed_days = assignment.get("allowed_days") or [0, 1, 2, 3, 4]
+        if parsed_req_date.weekday() in allowed_days:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Date {request.date} is already on one of the regular allowed weekdays."
+            )
+
+        custom_dates = assignment.get("custom_dates") or []
+        if request.date in custom_dates:
+            synced_rows = sync_assignment_schedule(assignment, program)
+            return build_assignment_summary(trainer, assignment, program, synced_rows)
+
+        # Append and save
+        new_custom_dates = list(custom_dates)
+        new_custom_dates.append(request.date)
+
+        updated_assignment = update_row(
+            "trainer_programs",
+            {
+                "custom_dates": new_custom_dates,
+                "updated_at": datetime.now().isoformat(),
+            },
+            filters={"id": f"eq.{assignment['id']}"},
+        ) or {**assignment, "custom_dates": new_custom_dates}
+
+        synced_rows = sync_assignment_schedule(updated_assignment, program)
+        clear_schedule_caches()
+        summary = build_assignment_summary(trainer, updated_assignment, program, synced_rows)
+        cache_manager.clear_pattern(TRAINER_SCHEDULE_CACHE_PATTERN)
+
+        await broadcast_schedule_update(
+            {
+                "event_type": "custom_date_added",
+                "trainer_id": trainer_id,
+                "trainer_user_id": trainer.get("user_id"),
+                "program_id": program_id,
+                "date": request.date,
+                "data": summary,
+            }
+        )
+        return summary
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/trainer/{trainer_id}/program/{program_id}/custom-date/{date_str}")
+async def remove_custom_date(
+    trainer_id: int,
+    program_id: int,
+    date_str: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)
+
+    try:
+        trainer, assignment, program = get_assignment_or_404(trainer_id, program_id)
+        custom_dates = assignment.get("custom_dates") or []
+        
+        if date_str not in custom_dates:
+            raise HTTPException(status_code=400, detail=f"Date {date_str} is not a custom date in the schedule.")
+
+        new_custom_dates = [d for d in custom_dates if d != date_str]
+
+        updated_assignment = update_row(
+            "trainer_programs",
+            {
+                "custom_dates": new_custom_dates,
+                "updated_at": datetime.now().isoformat(),
+            },
+            filters={"id": f"eq.{assignment['id']}"},
+        ) or {**assignment, "custom_dates": new_custom_dates}
+
+        synced_rows = sync_assignment_schedule(updated_assignment, program)
+        clear_schedule_caches()
+        summary = build_assignment_summary(trainer, updated_assignment, program, synced_rows)
+        cache_manager.clear_pattern(TRAINER_SCHEDULE_CACHE_PATTERN)
+
+        await broadcast_schedule_update(
+            {
+                "event_type": "custom_date_removed",
+                "trainer_id": trainer_id,
+                "trainer_user_id": trainer.get("user_id"),
+                "program_id": program_id,
+                "date": date_str,
+                "data": summary,
+            }
+        )
+        return summary
+    except SupabaseAPIError as exc:
+        raise_supabase_http(exc)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+
 
 
 @router.get("/approval-queue")

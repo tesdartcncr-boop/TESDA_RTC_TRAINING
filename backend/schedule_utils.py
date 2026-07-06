@@ -92,10 +92,25 @@ def calculate_base_days(program: dict[str, Any], hours_per_day: int) -> int:
         return 0
 
 
-def build_working_dates(start_date: date, total_days: int, allowed_days: list[int] = None) -> list[date]:
+def build_working_dates(
+    start_date: date, 
+    total_days: int, 
+    allowed_days: list[int] = None,
+    custom_dates: list[str] = None
+) -> list[date]:
     if not allowed_days:
         allowed_days = [0, 1, 2, 3, 4]
     
+    if custom_dates is None:
+        custom_dates = []
+
+    # Parse custom_dates to date objects
+    custom_dates_parsed = set()
+    for d_str in custom_dates:
+        d_parsed = parse_date(d_str)
+        if d_parsed:
+            custom_dates_parsed.add(d_parsed)
+
     dates: list[date] = []
     current = start_date
 
@@ -105,7 +120,7 @@ def build_working_dates(start_date: date, total_days: int, allowed_days: list[in
         valid_allowed_days = [0, 1, 2, 3, 4]
 
     while len(dates) < total_days:
-        if current.weekday() in valid_allowed_days:
+        if current in custom_dates_parsed or current.weekday() in valid_allowed_days:
             dates.append(current)
         current += timedelta(days=1)
 
@@ -242,7 +257,8 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
     if allowed_days is None:
         allowed_days = [0, 1, 2, 3, 4]
 
-    working_dates = build_working_dates(start_date, total_days, allowed_days) if total_days > 0 else []
+    custom_dates = assignment.get("custom_dates")
+    working_dates = build_working_dates(start_date, total_days, allowed_days, custom_dates) if total_days > 0 else []
     existing_by_day = {
         int(row["day_number"]): row
         for row in existing_rows
@@ -253,9 +269,11 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
     for index, schedule_day in enumerate(working_dates, start=1):
         schedule_date = schedule_day.isoformat()
         row = existing_by_day.get(index)
+        is_custom_date = schedule_date in (assignment.get("custom_dates") or [])
         payload = {
             "hours_per_day": hours_per_day,
             "schedule_date": schedule_date,
+            "is_custom": is_custom_date,
             "updated_at": datetime.now().isoformat(),
         }
 
@@ -263,6 +281,7 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
             if (
                 row.get("hours_per_day") != hours_per_day
                 or format_date(row.get("schedule_date")) != schedule_date
+                or row.get("is_custom") != is_custom_date
             ):
                 row = update_row(
                     "schedules",
@@ -282,6 +301,7 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
                 "day_number": index,
                 "hours_per_day": hours_per_day,
                 "schedule_date": schedule_date,
+                "is_custom": is_custom_date,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             },
@@ -358,5 +378,7 @@ def build_assignment_summary(
         "assigned_by_name": (assigned_user or {}).get("full_name") or (assigned_user or {}).get("username"),
         "assigned_by_position": (assigned_user or {}).get("position"),
         "assigned_by_signature_enabled": assignment.get("assigned_by_signature_enabled") is True,
+        "allowed_days": assignment.get("allowed_days") if assignment.get("allowed_days") is not None else [0, 1, 2, 3, 4],
+        "custom_dates": assignment.get("custom_dates") if assignment.get("custom_dates") is not None else [],
         "created_at": assignment.get("created_at"),
     }

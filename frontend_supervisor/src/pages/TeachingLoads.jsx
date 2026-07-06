@@ -486,7 +486,7 @@ export default function TeachingLoads() {
               placeholder={`Search ${viewMode === 'programs' ? 'programs' : 'trainers'}...`}
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+              className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2 text-sm text-black focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
             />
           </div>
         </div>

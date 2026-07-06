@@ -96,7 +96,7 @@ async def get_programs(
         
         # Apply search filter at database level
         if search:
-            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,validity::text.ilike.%{search}%,type.ilike.%{search}%,recognition_number.ilike.%{search}%)"
+            filters["or"] = f"(name.ilike.%{search}%,description.ilike.%{search}%,type.ilike.%{search}%,recognition_number.ilike.%{search}%)"
 
         total = count_rows("programs", filters=filters)
         

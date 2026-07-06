@@ -46,7 +46,7 @@ const normalizeProgramTypes = (data) => {
 }
 
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
-const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
+const fieldClassName = 'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-500 caret-slate-900 outline-none shadow-sm transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
 const formatDateOnly = (value) => (value ? String(value).split('T')[0] : 'Not set')
 
 export default function Programs() {
@@ -121,7 +121,7 @@ export default function Programs() {
   }
 
   useEffect(() => {
-    loadPrograms(true)
+    loadPrograms(false)
   }, [loadPrograms])
 
   useEffect(() => {

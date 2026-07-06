@@ -32,7 +32,7 @@ ORDER_TRAINER_NAME_ASC = "trainer_name.asc,username.asc"
 ASSIGNMENT_SUMMARY_SELECT = (
     "id,trainer_id,program_id,hours_per_day,approval_status,approval_notes,"
     "assigned_by,approved_by,approved_at,created_at,updated_at,nttc_number,"
-    "schedule_date,assigned_by_signature_enabled"
+    "schedule_date,assigned_by_signature_enabled,allowed_days,custom_dates"
 )
 
 

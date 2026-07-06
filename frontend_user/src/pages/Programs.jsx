@@ -87,7 +87,7 @@ const Programs = () => {
                 placeholder="Search programs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="input-field pl-10"
+                className="input-field pl-10 text-black"
               />
             </div>
           </div>

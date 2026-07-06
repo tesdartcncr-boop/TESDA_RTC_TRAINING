@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     schedule_date DATE,
     assigned_by_signature_enabled BOOLEAN DEFAULT false,
     allowed_days JSONB DEFAULT '[0, 1, 2, 3, 4]'::jsonb,
+    custom_dates JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(trainer_id, program_id)
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'nat', 'suspended', 'leave', 'incomplete')),
     schedule_date DATE,
     notes TEXT,
+    is_custom BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(trainer_id, program_id, day_number)

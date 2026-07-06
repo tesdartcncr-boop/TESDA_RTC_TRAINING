@@ -324,7 +324,7 @@ const ProgramMultiSelect = ({ selectedProgramIds = [], onSelectionChange }) => {
                 type="text"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                className="w-full rounded-lg border-2 border-gray-200 py-2.5 pl-10 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-lg border-2 border-gray-200 py-2.5 pl-10 pr-3 text-sm text-black focus:border-blue-500 focus:outline-none"
                 placeholder="Search qualifications..."
               />
             </div>

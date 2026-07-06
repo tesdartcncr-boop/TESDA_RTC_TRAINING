@@ -150,7 +150,7 @@ const AuthorizedEmails = () => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search authorized email..."
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg bg-white text-black placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
             />
           </div>
         </div>

@@ -60,7 +60,7 @@ export default function Dashboard() {
   }, [user?.id, user?.trainer_id])
 
   useEffect(() => {
-    loadTeachingLoads(true)
+    loadTeachingLoads(false)
   }, [loadTeachingLoads])
 
   useEffect(() => {
