@@ -83,7 +83,7 @@ export default function Profile() {
 
     if (field === 'sex') {
       return (
-        <select {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
+        <select {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
           <option value="">Select sex</option>
           <option value="Male">Male</option>
           <option value="Female">Female</option>
@@ -92,7 +92,7 @@ export default function Profile() {
       )
     }
 
-    return <input {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
+    return <input {...form.register(field)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
   }
 
   const handleSave = async (values) => {

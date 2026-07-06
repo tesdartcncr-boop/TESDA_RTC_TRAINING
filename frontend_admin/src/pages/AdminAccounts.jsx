@@ -216,7 +216,18 @@ export default function AdminAccounts() {
 
   const handleDelete = async (account) => {
     setAccountToDelete(null)
-    setIsProcessing(true)
+    const previousAccounts = [...accounts]
+
+    // 1. Immediately mark the account as isDeleting to trigger transition
+    setAccounts((prev) =>
+      prev.map((a) => (a.id === account.id ? { ...a, isDeleting: true } : a))
+    )
+
+    // 2. Remove from displayed state after transition ends
+    setTimeout(() => {
+      setAccounts((prev) => prev.filter((a) => a.id !== account.id))
+    }, 300)
+
     try {
       const response = await fetch(`${API_BASE}/api/admin/accounts/${account.id}`, {
         method: 'DELETE',
@@ -228,11 +239,12 @@ export default function AdminAccounts() {
       toast.success('Account deleted successfully')
       cacheManager.clearPattern('accounts_list:')
       cacheManager.clearPattern('stats_')
-      await loadAccounts()
+      cacheManager.clearPattern('admin_history')
+      loadAccounts()
     } catch (error) {
+      // 3. Rollback state if background deletion fails
+      setAccounts(previousAccounts)
       toast.error(error.message)
-    } finally {
-      setIsProcessing(false)
     }
   }
 
@@ -275,7 +287,14 @@ export default function AdminAccounts() {
         <div className="max-h-[34rem] overflow-y-auto pr-1">
           <div className="grid gap-5 xl:grid-cols-2">
           {accounts.map((account) => (
-            <div key={account.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div
+              key={account.id}
+              className={`rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 transform origin-center ${
+                account.isDeleting
+                  ? 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
+                  : 'opacity-100 scale-100 translate-y-0'
+              }`}
+            >
               <div className="flex items-start gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
                   {account.user_type === 'admin' ? <ShieldCheck className="h-7 w-7" /> : <User className="h-7 w-7" />}

@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
     assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    hours_per_day INTEGER NOT NULL DEFAULT 8 CHECK (hours_per_day IN (4, 8)),
+    hours_per_day INTEGER NOT NULL DEFAULT 8,
     approval_status VARCHAR(20) NOT NULL DEFAULT 'for approval' CHECK (approval_status IN ('for approval', 'approved', 'rejected')),
     approval_notes TEXT,
     approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS trainer_programs (
     nttc_number VARCHAR(50),
     schedule_date DATE,
     assigned_by_signature_enabled BOOLEAN DEFAULT false,
+    allowed_days JSONB DEFAULT '[0, 1, 2, 3, 4]'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(trainer_id, program_id)
@@ -100,7 +101,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
     program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
     day_number INTEGER NOT NULL,
-    hours_per_day INTEGER NOT NULL CHECK (hours_per_day IN (4, 8)),
+    hours_per_day INTEGER NOT NULL,
     status VARCHAR(20) DEFAULT NULL CHECK (status IS NULL OR status IN ('complete', 'absent', 'nat', 'suspended', 'leave', 'incomplete')),
     schedule_date DATE,
     notes TEXT,
@@ -233,7 +234,7 @@ ALTER TABLE IF EXISTS trainer_programs
 DROP CONSTRAINT IF EXISTS trainer_programs_hours_per_day_check;
 
 ALTER TABLE IF EXISTS trainer_programs
-ADD CONSTRAINT trainer_programs_hours_per_day_check CHECK (hours_per_day IN (4, 8));
+ADD CONSTRAINT trainer_programs_hours_per_day_check CHECK (hours_per_day >= 1 AND hours_per_day <= 24);
 
 ALTER TABLE IF EXISTS trainer_programs
 DROP CONSTRAINT IF EXISTS trainer_programs_approval_status_check;

@@ -5,7 +5,7 @@ from typing import Any
 from .supabase_rest import SupabaseAPIError, delete_rows, insert_row, select_rows, update_row
 
 DEFAULT_HOURS_PER_DAY = 8
-VALID_HOURS_PER_DAY = {4, 8}
+VALID_HOURS_PER_DAY = set(range(1, 25))
 VALID_STATUSES = {"complete", "absent", "nat", "leave", "suspended", "incomplete"}
 NON_COMPLETE_STATUSES = {"absent", "nat", "leave", "suspended", "incomplete"}
 IN_PROGRESS_STATUS = "in progress"
@@ -92,12 +92,20 @@ def calculate_base_days(program: dict[str, Any], hours_per_day: int) -> int:
         return 0
 
 
-def build_working_dates(start_date: date, total_days: int) -> list[date]:
+def build_working_dates(start_date: date, total_days: int, allowed_days: list[int] = None) -> list[date]:
+    if not allowed_days:
+        allowed_days = [0, 1, 2, 3, 4]
+    
     dates: list[date] = []
     current = start_date
 
+    # Safety check to prevent infinite loop
+    valid_allowed_days = [d for d in allowed_days if 0 <= d <= 6]
+    if not valid_allowed_days:
+        valid_allowed_days = [0, 1, 2, 3, 4]
+
     while len(dates) < total_days:
-        if current.weekday() < 5:
+        if current.weekday() in valid_allowed_days:
             dates.append(current)
         current += timedelta(days=1)
 
@@ -230,10 +238,11 @@ def sync_assignment_schedule(assignment: dict[str, Any], program: dict[str, Any]
     required_days = base_days + non_complete_days
     total_days = max(required_days, get_last_used_day(existing_rows))
 
-    if total_days <= 0:
-        total_days = base_days
+    allowed_days = assignment.get("allowed_days")
+    if allowed_days is None:
+        allowed_days = [0, 1, 2, 3, 4]
 
-    working_dates = build_working_dates(start_date, total_days) if total_days > 0 else []
+    working_dates = build_working_dates(start_date, total_days, allowed_days) if total_days > 0 else []
     existing_by_day = {
         int(row["day_number"]): row
         for row in existing_rows

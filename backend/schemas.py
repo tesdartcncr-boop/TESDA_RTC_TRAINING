@@ -237,6 +237,7 @@ class TeachingLoadCreate(BaseModel):
     schedule_date: Optional[date] = None
     batch: Optional[str] = None
     use_digital_signature: bool = False
+    allowed_days: Optional[list[int]] = None
 
 
 class TeachingLoadApprovalUpdate(BaseModel):
@@ -258,6 +259,7 @@ class TeachingLoadResponse(BaseModel):
     schedule_date: Optional[date] = None
     batch: Optional[str] = None
     assigned_by_signature_enabled: bool = False
+    allowed_days: Optional[list[int]] = None
     created_at: datetime
 
     class Config:

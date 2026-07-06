@@ -103,6 +103,7 @@ def clear_trainer_caches():
     cache_manager.clear_pattern("trainer_schedule:*")
     cache_manager.clear_pattern("trainer_programs:*")
     cache_manager.clear_pattern("teaching_loads_summary:*")
+    cache_manager.clear_pattern("admin_history:*")
 
 
 def get_qualification_cache_key(trainer_id: int) -> str:
@@ -496,8 +497,8 @@ async def assign_program_to_trainer(
 ):
     ensure_admin(current_user)
 
-    if assignment.hours_per_day not in {4, 8}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="hours_per_day must be 4 or 8")
+    if assignment.hours_per_day < 1 or assignment.hours_per_day > 24:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="hours_per_day must be between 1 and 24")
 
     try:
         trainer = get_trainer_or_404(trainer_id)
@@ -543,9 +544,28 @@ async def assign_program_to_trainer(
             },
         )
         if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Program already assigned to this trainer",
+            if existing.get("approval_status") == "approved":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Program already assigned to this trainer",
+                )
+            
+            # Delete existing non-approved assignment and its schedule entries to allow reassignment
+            delete_rows(
+                "schedules",
+                filters={
+                    "trainer_id": f"eq.{trainer_id}",
+                    "program_id": f"eq.{assignment.program_id}",
+                },
+                returning="minimal",
+            )
+            delete_rows(
+                "trainer_programs",
+                filters={
+                    "trainer_id": f"eq.{trainer_id}",
+                    "program_id": f"eq.{assignment.program_id}",
+                },
+                returning="minimal",
             )
 
         schedule_date = assignment.schedule_date.isoformat() if assignment.schedule_date else date.today().isoformat()
@@ -560,6 +580,7 @@ async def assign_program_to_trainer(
                 "nttc_number": assignment.nttc_number or qualification.get("nttc_number"),
                 "schedule_date": schedule_date,
                 "assigned_by_signature_enabled": assignment.use_digital_signature,
+                "allowed_days": assignment.allowed_days if assignment.allowed_days is not None else [0, 1, 2, 3, 4],
             },
         )
         synced_rows = sync_assignment_schedule(assignment_row, program)

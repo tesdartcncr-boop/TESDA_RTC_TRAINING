@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
 import React, { useEffect, useMemo, useState } from 'react'
-import { FileClock, GraduationCap, ShieldAlert } from 'lucide-react'
+import { FileClock, GraduationCap, RotateCw, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { cacheManager } from '../utils/cacheManager'
 
@@ -28,33 +28,43 @@ export default function History() {
   const [history, setHistory] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const cacheKey = cacheManager.generateKey('admin_history')
+  const loadHistory = async (force = false) => {
+    setLoading(true)
+    try {
+      const cacheKey = cacheManager.generateKey('admin_history')
+      if (force) {
+        cacheManager.delete(cacheKey)
+      } else {
         const cached = cacheManager.get(cacheKey)
         if (cached !== null) {
           setHistory(cached)
+          setLoading(false)
           return
         }
-
-        const response = await fetch(`${API_BASE}/api/admin/history`, {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || 'Failed to load history')
-        setHistory(data)
-        cacheManager.set(cacheKey, data)
-      } catch (error) {
-        toast.error(error.message)
-        setHistory(null)
-      } finally {
-        setLoading(false)
       }
-    }
 
+      const response = await fetch(`${API_BASE}/api/admin/history`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Failed to load history')
+      setHistory(data)
+      cacheManager.set(cacheKey, data)
+    } catch (error) {
+      toast.error(error.message)
+      setHistory(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
     loadHistory()
   }, [])
+
+  const handleRefresh = () => {
+    loadHistory(true)
+  }
 
   const summary = history?.summary || {}
   const expiredPrograms = useMemo(() => history?.expired_programs || [], [history])
@@ -63,12 +73,22 @@ export default function History() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-sky-900 to-cyan-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-sky-100">Expired records</p>
-        <h1 className="mt-4 text-4xl font-black">History</h1>
-        <p className="mt-3 max-w-3xl text-sky-50/90">
-          Track expired programs, trainer credentials, and other qualification records that need renewal or archival.
-        </p>
+      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-sky-900 to-cyan-700 p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.25)] flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-[0.24em] text-sky-100">Expired records</p>
+          <h1 className="mt-4 text-4xl font-black">History</h1>
+          <p className="mt-3 max-w-3xl text-sky-50/90">
+            Track expired programs, trainer credentials, and other qualification records that need renewal or archival.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          className="inline-flex items-center self-start md:self-center rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 px-5 py-3 text-sm font-bold text-white transition-colors"
+        >
+          <RotateCw className="mr-2 h-4 w-4" />
+          Refresh
+        </button>
       </section>
 
       <section className="grid gap-4 md:grid-cols-4">

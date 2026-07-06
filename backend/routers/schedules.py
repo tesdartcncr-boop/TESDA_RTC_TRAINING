@@ -243,8 +243,8 @@ async def create_or_update_schedule_day(
     if day_number <= 0:
         raise HTTPException(status_code=400, detail="day_number must be greater than 0")
 
-    if request.hours_per_day not in VALID_HOURS_PER_DAY:
-        raise HTTPException(status_code=400, detail="hours_per_day must be 4 or 8")
+    if request.hours_per_day < 1 or request.hours_per_day > 24:
+        raise HTTPException(status_code=400, detail="hours_per_day must be between 1 and 24")
 
     if request.status and request.status.value not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status value")
@@ -331,8 +331,8 @@ async def update_assignment_hours_per_day(
     request: ScheduleHoursUpdate,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    if request.hours_per_day not in VALID_HOURS_PER_DAY:
-        raise HTTPException(status_code=400, detail="hours_per_day must be 4 or 8")
+    if request.hours_per_day < 1 or request.hours_per_day > 24:
+        raise HTTPException(status_code=400, detail="hours_per_day must be between 1 and 24")
 
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ACCESS_DENIED)

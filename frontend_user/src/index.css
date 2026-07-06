@@ -80,3 +80,10 @@
     backdrop-filter: blur(4px);
   }
 }
+
+/* Hide native password reveal and clear buttons in browsers like Edge/IE */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none !important;
+}
+

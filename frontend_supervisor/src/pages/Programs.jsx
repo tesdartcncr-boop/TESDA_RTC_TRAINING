@@ -57,6 +57,8 @@ export default function Programs() {
   const [programTypes, setProgramTypes] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingProgram, setEditingProgram] = useState(null)
+  const [programToDelete, setProgramToDelete] = useState(null)
+
 
   const createForm = useForm({
     defaultValues: {
@@ -242,7 +244,19 @@ export default function Programs() {
   }
 
   const handleDelete = async (programId) => {
-    if (!globalThis.confirm('Deactivate this program?')) return
+    setProgramToDelete(null)
+    const previousPrograms = [...programs]
+
+    // 1. Immediately trigger transition animation
+    setPrograms((prev) =>
+      prev.map((p) => (p.id === programId ? { ...p, isDeleting: true } : p))
+    )
+
+    // 2. Filter out of active list after animation time (300ms)
+    setTimeout(() => {
+      setPrograms((prev) => prev.filter((p) => p.id !== programId))
+    }, 300)
+
     try {
       const response = await fetch(`${API_BASE}/api/programs/${programId}`, {
         method: 'DELETE',
@@ -256,8 +270,11 @@ export default function Programs() {
       cacheManager.clearPattern('programs_list:')
       cacheManager.clearPattern('programs:')
       cacheManager.clearPattern('stats_')
+      cacheManager.clearPattern('admin_history')
       loadPrograms(true)
     } catch (error) {
+      // 3. Rollback on failure
+      setPrograms(previousPrograms)
       toast.error(error.message)
     }
   }
@@ -298,7 +315,14 @@ export default function Programs() {
         <div className="max-h-[36rem] overflow-y-auto pr-1">
           <div className="grid gap-5 xl:grid-cols-3">
           {filteredPrograms.map((program) => (
-            <div key={program.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div
+              key={program.id}
+              className={`rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 transform origin-center ${
+                program.isDeleting
+                  ? 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
+                  : 'opacity-100 scale-100 translate-y-0'
+              }`}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
@@ -320,7 +344,7 @@ export default function Programs() {
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
                 </button>
-                <button type="button" onClick={() => handleDelete(program.id)} className="inline-flex flex-1 items-center justify-center rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50">
+                <button type="button" onClick={() => setProgramToDelete(program)} className="inline-flex flex-1 items-center justify-center rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50">
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
                 </button>
@@ -408,6 +432,31 @@ export default function Programs() {
               <button type="submit" className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3 text-sm font-semibold text-white">Update Program</button>
             </div>
           </form>
+        </ModalShell>
+      )}
+      {programToDelete && (
+        <ModalShell title="Confirm Delete" onClose={() => setProgramToDelete(null)} maxWidth="max-w-lg">
+          <div className="space-y-5">
+            <p className="text-sm text-slate-600">
+              Are you sure you want to deactivate the program <strong>{programToDelete.name}</strong>?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setProgramToDelete(null)}
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete(programToDelete.id)}
+                className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>

@@ -54,6 +54,8 @@ export default function Login() {
   const [resetEmail, setResetEmail] = useState('')
   const [isSendingResetOtp, setIsSendingResetOtp] = useState(false)
   const [isResettingPassword, setIsResettingPassword] = useState(false)
+  const [showResetPassword, setShowResetPassword] = useState(false)
+
 
   const loginForm = useForm({
     mode: 'onBlur',
@@ -79,6 +81,7 @@ export default function Login() {
     setShowResetModal(false)
     setResetEmail('')
     resetForm.reset()
+    setShowResetPassword(false)
   }
 
   const handleSubmitLogin = async (values) => {
@@ -314,13 +317,20 @@ export default function Login() {
                 <KeyRound className="pointer-events-none absolute left-3 top-3.5 h-5 w-5 text-slate-400" />
                 <input
                   id="trainer_reset_password"
-                  type="password"
+                  type={showResetPassword ? 'text' : 'password'}
                   autoComplete="new-password"
                   maxLength={128}
                   {...resetForm.register('new_password', newPasswordRules)}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 pl-11 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pl-11 pr-11 text-slate-900 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
                   placeholder="Create a stronger password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowResetPassword((current) => !current)}
+                  className="absolute right-3 top-3 text-slate-400 transition hover:text-slate-700"
+                >
+                  {showResetPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
               {resetForm.formState.errors.new_password ? (
                 <p className="mt-1 text-sm text-rose-600">{resetForm.formState.errors.new_password.message}</p>

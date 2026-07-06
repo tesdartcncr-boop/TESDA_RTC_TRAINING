@@ -260,6 +260,7 @@ async def delete_program(program_id: int, current_user: CurrentUser):
         cache_manager.clear_pattern("trainer_schedule:*")
         cache_manager.clear_pattern("teaching_loads_summary:*")
         cache_manager.clear_pattern("trainer_qualifications:*")
+        cache_manager.clear_pattern("admin_history:*")
 
         # Broadcast program deletion and schedule updates
         await broadcast_program_update({

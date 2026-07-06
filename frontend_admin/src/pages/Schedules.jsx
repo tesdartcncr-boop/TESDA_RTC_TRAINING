@@ -93,6 +93,7 @@ export default function Schedules() {
   const [savedSignature, setSavedSignature] = useState(null)
   const [signatureChoice, setSignatureChoice] = useState('none')
   const [signatureUpload, setSignatureUpload] = useState(null)
+  const [allowedDays, setAllowedDays] = useState([0, 1, 2, 3, 4])
 
   const createForm = useForm({
     defaultValues: {
@@ -142,6 +143,7 @@ export default function Schedules() {
     setAssignmentWarning(null)
     setSignatureUpload(null)
     setSignatureChoice(savedSignature ? 'existing' : 'none')
+    setAllowedDays([0, 1, 2, 3, 4])
   }
 
   useEffect(() => {
@@ -454,6 +456,12 @@ export default function Schedules() {
         return
       }
 
+      if (allowedDays.length === 0) {
+        toast.error('Please select at least one day for the schedule')
+        setIsProcessing(false)
+        return
+      }
+
       const response = await fetch(`${API_BASE}/api/trainers/${values.trainer_id}/programs`, {
         method: 'POST',
         headers: {
@@ -466,6 +474,7 @@ export default function Schedules() {
           schedule_date: values.schedule_date || null,
           batch: values.batch || null,
           use_digital_signature: finalUseDigitalSignature,
+          allowed_days: allowedDays,
         }),
       })
       if (!response.ok) {
@@ -485,6 +494,7 @@ export default function Schedules() {
         schedule_date: '',
         batch: '',
       })
+      setAllowedDays([0, 1, 2, 3, 4])
       setEligiblePrograms([])
       closeCreateModal()
       loadAssignments(true)
@@ -738,11 +748,51 @@ export default function Schedules() {
               </select>
             </div>
             <div>
-              <label htmlFor="teaching_load_hours_per_day" className="block text-sm font-semibold text-slate-700">Schedule Type</label>
-              <select id="teaching_load_hours_per_day" {...createForm.register('hours_per_day')} className={`${fieldClassName} mt-2`}>
-                <option value={8}>8 hours/day</option>
-                <option value={4}>4 hours/day</option>
-              </select>
+              <label htmlFor="teaching_load_hours_per_day" className="block text-sm font-semibold text-slate-700">Hours Per Day</label>
+              <input
+                id="teaching_load_hours_per_day"
+                type="number"
+                min={1}
+                max={24}
+                {...createForm.register('hours_per_day', { required: true, min: 1, max: 24 })}
+                className={`${fieldClassName} mt-2`}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Schedule Days</label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[
+                  { label: 'Mon', value: 0 },
+                  { label: 'Tue', value: 1 },
+                  { label: 'Wed', value: 2 },
+                  { label: 'Thu', value: 3 },
+                  { label: 'Fri', value: 4 },
+                  { label: 'Sat', value: 5 },
+                  { label: 'Sun', value: 6 },
+                ].map((day) => {
+                  const isChecked = allowedDays.includes(day.value)
+                  return (
+                    <button
+                      key={day.value}
+                      type="button"
+                      onClick={() => {
+                        setAllowedDays((prev) =>
+                          prev.includes(day.value)
+                            ? prev.filter((d) => d !== day.value)
+                            : [...prev, day.value]
+                        )
+                      }}
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold border transition ${
+                        isChecked
+                          ? 'bg-sky-500 border-sky-500 text-white'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {day.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
             <div>
               <label htmlFor="teaching_load_start_date" className="block text-sm font-semibold text-slate-700">Start Date</label>
@@ -792,7 +842,7 @@ export default function Schedules() {
               </div>
             </div>
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-              The calendar is generated automatically using weekdays only. New extra days are added when a day is marked absent, NAT, leave, suspended, or incomplete.
+              The calendar is generated automatically using the selected schedule days. New extra days are added when a day is marked absent, NAT, leave, suspended, or incomplete.
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={closeCreateModal} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>

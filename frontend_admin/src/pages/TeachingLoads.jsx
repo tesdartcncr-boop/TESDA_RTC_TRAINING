@@ -345,7 +345,30 @@ export default function TeachingLoads() {
   const handleDeleteTeachingLoad = useCallback(async (load) => {
     if (!load) return
 
-    setIsDeleting(true)
+    const previousTeachingLoads = [...teachingLoads]
+    const previousAllTeachingLoads = [...allTeachingLoads]
+
+    setDeleteTarget(null)
+
+    // 1. Immediately trigger transition animation
+    setTeachingLoads((prev) =>
+      prev.map((l) => (l.id === load.id ? { ...l, isDeleting: true } : l))
+    )
+
+    // 2. Filter out of active list after animation time (300ms)
+    setTimeout(() => {
+      setTeachingLoads((prev) => prev.filter((l) => l.id !== load.id))
+      setAllTeachingLoads((prev) =>
+        prev.filter(
+          (l) =>
+            !(
+              isSameId(l.trainer_id, load.trainer_id) &&
+              isSameId(l.program_id, load.program_id)
+            )
+        )
+      )
+    }, 300)
+
     try {
       const response = await fetch(`${API_BASE}/api/trainers/${load.trainer_id}/programs/${load.program_id}`, {
         method: 'DELETE',
@@ -357,26 +380,29 @@ export default function TeachingLoads() {
         throw new Error(error.detail || 'Failed to delete teaching load')
       }
 
-      setDeleteTarget(null)
       if (selectedLoad?.id === load.id) {
         setSelectedLoad(null)
       }
 
-      await refreshTeachingLoadCaches()
+      refreshTeachingLoadCaches()
 
       if (selectedProgram?.id === load.program_id) {
-        await loadProgramTeachingLoads(load.program_id)
+        loadProgramTeachingLoads(load.program_id)
       }
 
       if (selectedTrainer?.id === load.trainer_id) {
-        await loadTrainerTeachingLoads(load.trainer_id)
+        loadTrainerTeachingLoads(load.trainer_id)
       }
+
+      loadAllTeachingLoads()
     } catch (error) {
       console.error('Failed to delete teaching load:', error)
-    } finally {
-      setIsDeleting(false)
+      // 3. Rollback on failure
+      setTeachingLoads(previousTeachingLoads)
+      setAllTeachingLoads(previousAllTeachingLoads)
+      toast.error(error.message || 'Failed to delete teaching load')
     }
-  }, [loadProgramTeachingLoads, loadTrainerTeachingLoads, refreshTeachingLoadCaches, selectedLoad, selectedProgram?.id, selectedTrainer?.id])
+  }, [teachingLoads, allTeachingLoads, selectedLoad, selectedProgram?.id, selectedTrainer?.id, refreshTeachingLoadCaches, loadProgramTeachingLoads, loadTrainerTeachingLoads, loadAllTeachingLoads])
 
   // Filter data based on search term
   const filteredPrograms = useMemo(() => {
@@ -638,7 +664,11 @@ function ProgramsView({
                         <div
                           key={load.id}
                           onClick={() => onLoadSelect(load)}
-                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition hover:border-cyan-300 hover:bg-cyan-50"
+                          className={`flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition-all duration-300 transform origin-center hover:border-cyan-300 hover:bg-cyan-50 ${
+                            load.isDeleting
+                              ? 'opacity-0 scale-95 pointer-events-none'
+                              : 'opacity-100 scale-100'
+                          }`}
                         >
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{load.trainer_name}</p>
@@ -787,7 +817,11 @@ function TrainersView({
                         <div
                           key={load.id}
                           onClick={() => onLoadSelect(load)}
-                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition hover:border-cyan-300 hover:bg-cyan-50"
+                          className={`flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 cursor-pointer transition-all duration-300 transform origin-center hover:border-cyan-300 hover:bg-cyan-50 ${
+                            load.isDeleting
+                              ? 'opacity-0 scale-95 pointer-events-none'
+                              : 'opacity-100 scale-100'
+                          }`}
                         >
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{load.program_name}</p>
@@ -882,40 +916,60 @@ function ReadOnlyCalendarView({ teachingLoad }) {
   const getStatusOption = (status) => STATUS_OPTIONS.find((option) => option.key === status)
   const getStatusDisplay = (status) => getStatusOption(status)?.shortLabel || status || 'open'
 
-  // Helper function to generate calendar weeks
-  const generateCalendarWeeks = (totalDays) => {
+  const generateCalendarWeeks = () => {
+    if (scheduleDays.length === 0) return []
+
+    // Sort entries by schedule_date
+    const sortedEntries = [...scheduleDays].sort((a, b) => {
+      const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
+      const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
+      return dateA - dateB
+    })
+
+    const firstDatePart = String(sortedEntries[0].schedule_date).split('T')[0]
+    const firstDate = new Date(`${firstDatePart}T00:00:00`)
+    const dayOfWeek = firstDate.getDay() // 0 = Sun, 1 = Mon, ...
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const startOfWeek = new Date(firstDate)
+    startOfWeek.setDate(firstDate.getDate() - daysToMonday)
+
+    const lastDatePart = String(sortedEntries[sortedEntries.length - 1].schedule_date).split('T')[0]
+    const lastDate = new Date(`${lastDatePart}T00:00:00`)
+    const lastDayOfWeek = lastDate.getDay()
+    const daysToSunday = lastDayOfWeek === 0 ? 0 : 7 - lastDayOfWeek
+    const endOfWeek = new Date(lastDate)
+    endOfWeek.setDate(lastDate.getDate() + daysToSunday)
+
     const weeks = []
-    let currentDay = 1
-    
-    while (currentDay <= totalDays) {
+    let current = new Date(startOfWeek)
+
+    const dateToEntryMap = {}
+    for (const entry of scheduleDays) {
+      if (entry.schedule_date) {
+        const dateStr = String(entry.schedule_date).split('T')[0]
+        dateToEntryMap[dateStr] = entry
+      }
+    }
+
+    while (current <= endOfWeek) {
       const week = []
-      
-      // Add Monday to Friday (work days)
-      for (let i = 0; i < 5; i++) {
-        if (currentDay <= totalDays) {
-          week.push({
-            dayNumber: currentDay,
-            dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i],
-            isWeekend: false
-          })
-          currentDay++
-        } else {
-          week.push(null)
-        }
-      }
-      
-      // Add Saturday and Sunday (weekend)
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < 7; i++) {
+        const dateStr = current.toISOString().split('T')[0]
+        const entry = dateToEntryMap[dateStr]
+
         week.push({
-          dayNumber: null,
-          dayName: ['Sat', 'Sun'][i],
-          isWeekend: true
+          date: new Date(current),
+          dateStr: dateStr,
+          entry: entry || null,
+          dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
+          isWeekend: i === 5 || i === 6,
         })
+
+        current.setDate(current.getDate() + 1)
       }
-      
       weeks.push(week)
     }
-    
+
     return weeks
   }
 
@@ -953,39 +1007,60 @@ function ReadOnlyCalendarView({ teachingLoad }) {
           
           {/* Calendar Weeks */}
           <div className="space-y-1">
-            {generateCalendarWeeks(calendarDays).map((week, weekIndex) => (
-              <div key={weekIndex} className="grid grid-cols-7 gap-1">
-                {week.map((day, dayIndex) => {
-                  if (day === null) {
+            {generateCalendarWeeks().map((week, weekIndex) => (
+              <div key={`week-${weekIndex}`} className="grid grid-cols-7 gap-1">
+                {week.map((cell) => {
+                  const formattedDate = new Date(`${cell.dateStr}T00:00:00`).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                  })
+
+                  if (cell.entry === null) {
+                    const shortDate = new Date(`${cell.dateStr}T00:00:00`).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric'
+                    })
                     return (
-                      <div key={`empty-${dayIndex}`} className="aspect-square" />
-                    )
-                  }
-                  
-                  if (day.isWeekend) {
-                    return (
-                      <div key={`weekend-${dayIndex}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
-                        <p className="text-xs font-medium text-slate-400">{day.dayName}</p>
+                      <div 
+                        key={cell.dateStr} 
+                        className="aspect-square rounded-lg border border-slate-100 p-2 text-center flex flex-col justify-between bg-slate-50/50"
+                      >
+                        <div className="opacity-40">
+                          <p className="text-[10px] font-bold text-slate-400">{cell.dayName}</p>
+                          <p className="text-[10px] text-slate-400 font-medium">{shortDate}</p>
+                        </div>
+                        <div className="flex justify-center my-1 opacity-20">
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-slate-400 bg-slate-200">
+                            -
+                          </span>
+                        </div>
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400 opacity-40">
+                          Off Day
+                        </p>
                       </div>
                     )
                   }
                   
-                  const entry = dayMap[day.dayNumber]
+                  const entry = cell.entry
                   const status = entry?.status
                   const color = getStatusOption(status)?.color || 'bg-slate-300'
                   
                   return (
                     <div
-                      key={day.dayNumber}
-                      className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center"
+                      key={cell.dateStr}
+                      className="aspect-square bg-white border border-slate-200 rounded-lg p-2 text-center flex flex-col justify-between"
                     >
-                      <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
-                      <div className="mt-1 flex justify-center">
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
+                        <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                      </div>
+                      <div className="flex justify-center my-1">
                         <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                          {status ? getStatusDisplay(status).charAt(0).toUpperCase() : day.dayNumber}
+                          {status ? getStatusDisplay(status).charAt(0).toUpperCase() : entry.day_number}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
+                      <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 truncate">
                         {getStatusDisplay(status)}
                       </p>
                     </div>

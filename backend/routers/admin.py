@@ -259,6 +259,7 @@ async def delete_account(account_id: int, current_user: CurrentUser):
         delete_user_auth_artifacts(account.get("email"))
         delete_rows("notifications", filters={"user_id": f"eq.{account_id}"}, returning="minimal")
         delete_rows("users", filters={"id": f"eq.{account_id}"}, returning="minimal")
+        cache_manager.clear_pattern("admin_history:*")
 
         return {"message": "Account deleted successfully"}
     except SupabaseAPIError as exc:
@@ -691,6 +692,8 @@ async def get_history(current_user: CurrentUser):
     expired_qualification_records = []
     for trainer in trainers:
         user = trainer_user_map.get(trainer.get("user_id"))
+        if not user:
+            continue
         if is_expired_date(trainer.get("tm_expiration")):
             expired_tmc_records.append(
                 {
@@ -717,8 +720,10 @@ async def get_history(current_user: CurrentUser):
             )
 
     for qualification in qualifications:
-        trainer = qualification_trainer_map.get(qualification.get("trainer_id"), {})
-        program = qualification_program_map.get(qualification.get("program_id"), {})
+        trainer = qualification_trainer_map.get(qualification.get("trainer_id"))
+        program = qualification_program_map.get(qualification.get("program_id"))
+        if not trainer or not program:
+            continue
         if is_expired_date(qualification.get("nttc_expiration")) or is_expired_date(program.get("validity")):
             trainer_user = trainer_user_map.get(trainer.get("user_id"))
             expired_qualification_records.append(

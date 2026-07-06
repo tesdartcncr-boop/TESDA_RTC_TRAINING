@@ -111,49 +111,64 @@ export default function TrainerScheduleView({ program, trainerId }) {
     }
   }
 
-  // Helper function to generate calendar weeks using weekday slots first,
-  // then fixed weekend placeholders to match the admin calendar layout.
-  const generateCalendarWeeks = (totalDays) => {
+  const generateCalendarWeeks = () => {
+    if (scheduleDays.length === 0) return []
+
+    // Sort entries by schedule_date
+    const sortedEntries = [...scheduleDays].sort((a, b) => {
+      const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
+      const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
+      return dateA - dateB
+    })
+
+    const firstDatePart = String(sortedEntries[0].schedule_date).split('T')[0]
+    const firstDate = new Date(`${firstDatePart}T00:00:00`)
+    const dayOfWeek = firstDate.getDay() // 0 = Sun, 1 = Mon, ...
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const startOfWeek = new Date(firstDate)
+    startOfWeek.setDate(firstDate.getDate() - daysToMonday)
+
+    const lastDatePart = String(sortedEntries[sortedEntries.length - 1].schedule_date).split('T')[0]
+    const lastDate = new Date(`${lastDatePart}T00:00:00`)
+    const lastDayOfWeek = lastDate.getDay()
+    const daysToSunday = lastDayOfWeek === 0 ? 0 : 7 - lastDayOfWeek
+    const endOfWeek = new Date(lastDate)
+    endOfWeek.setDate(lastDate.getDate() + daysToSunday)
+
     const weeks = []
-    let currentDay = 1
-    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-    const weekendLabels = ['Sat', 'Sun']
+    let current = new Date(startOfWeek)
 
-    while (currentDay <= totalDays) {
+    const dateToEntryMap = {}
+    for (const entry of scheduleDays) {
+      if (entry.schedule_date) {
+        const dateStr = String(entry.schedule_date).split('T')[0]
+        dateToEntryMap[dateStr] = entry
+      }
+    }
+
+    while (current <= endOfWeek) {
       const week = []
+      for (let i = 0; i < 7; i++) {
+        const dateStr = current.toISOString().split('T')[0]
+        const entry = dateToEntryMap[dateStr]
 
-      for (let i = 0; i < 5; i++) {
-        if (currentDay <= totalDays) {
-          week.push({
-            dayNumber: currentDay,
-            dayName: weekdayLabels[i],
-            isWeekend: false,
-          })
-          currentDay++
-        } else {
-          week.push({
-            dayNumber: null,
-            dayName: weekdayLabels[i],
-            isWeekend: false,
-          })
-        }
-      }
-
-      for (let i = 0; i < 2; i++) {
         week.push({
-          dayNumber: null,
-          dayName: weekendLabels[i],
-          isWeekend: true,
+          date: new Date(current),
+          dateStr: dateStr,
+          entry: entry || null,
+          dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
+          isWeekend: i === 5 || i === 6,
         })
-      }
 
+        current.setDate(current.getDate() + 1)
+      }
       weeks.push(week)
     }
 
     return weeks
   }
 
-return (
+  return (
     <div className="space-y-6">
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -195,24 +210,42 @@ return (
               
               {/* Calendar Weeks */}
               <div className="space-y-1">
-                {generateCalendarWeeks(calendarDays).map((week) => (
-                  <div key={`week-${week[0]?.dayNumber}`} className="grid grid-cols-7 gap-1">
-                    {week.map((day) => {
-                      if (day.dayNumber === null && !day.isWeekend) {
+                {generateCalendarWeeks().map((week) => (
+                  <div key={`week-${week[0]?.dateStr}`} className="grid grid-cols-7 gap-1">
+                    {week.map((cell) => {
+                      const formattedDate = new Date(`${cell.dateStr}T00:00:00`).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })
+
+                      if (cell.entry === null) {
+                        const shortDate = new Date(`${cell.dateStr}T00:00:00`).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric'
+                        })
                         return (
-                          <div key={`placeholder-${day.dayName}`} className="aspect-square" />
-                        )
-                      }
-                      
-                      if (day.isWeekend) {
-                        return (
-                          <div key={`weekend-${day.dayName}`} className="aspect-square bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center">
-                            <p className="text-xs font-medium text-slate-400">{day.dayName}</p>
+                          <div 
+                            key={cell.dateStr} 
+                            className="aspect-square rounded-lg border border-slate-100 p-2 text-center flex flex-col justify-between bg-slate-50/50"
+                          >
+                            <div className="opacity-40">
+                              <p className="text-[10px] font-bold text-slate-400">{cell.dayName}</p>
+                              <p className="text-[10px] text-slate-400 font-medium">{shortDate}</p>
+                            </div>
+                            <div className="flex justify-center my-1 opacity-20">
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-slate-400 bg-slate-200">
+                                -
+                              </span>
+                            </div>
+                            <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400 opacity-40">
+                              Off Day
+                            </p>
                           </div>
                         )
                       }
                       
-                      const entry = dayMap[day.dayNumber]
+                      const entry = cell.entry
                       const status = entry?.status
                       const color = getStatusOption(status)?.color || 'bg-slate-300'
                       const locked = isFutureDay(entry?.schedule_date)
@@ -220,18 +253,25 @@ return (
                       return (
                         <button
                           type="button"
-                          key={day.dayNumber}
-                          onClick={() => !locked && setSelectedDay(day.dayNumber)}
+                          key={cell.dateStr}
+                          onClick={() => !locked && setSelectedDay(entry.day_number)}
                           disabled={locked}
-                          className={`aspect-square rounded-lg border border-slate-200 p-2 text-center transition-all ${locked ? 'cursor-not-allowed bg-slate-50 opacity-60' : 'bg-white hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm'}`}
+                          className={`aspect-square rounded-lg border border-slate-200 p-2 text-center transition-all flex flex-col justify-between ${
+                            locked 
+                              ? 'cursor-not-allowed bg-slate-50 opacity-60' 
+                              : 'bg-white hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm'
+                          }`}
                         >
-                          <p className="text-xs font-bold text-slate-700">Day {day.dayNumber}</p>
-                          <div className="mt-1 flex justify-center">
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
+                            <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                          </div>
+                          <div className="flex justify-center my-1">
                             <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
-                              {status ? getStatusDisplay(status).charAt(0).toUpperCase() : day.dayNumber}
+                              {status ? getStatusDisplay(status).charAt(0).toUpperCase() : entry.day_number}
                             </span>
                           </div>
-                          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500 truncate">
+                          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 truncate">
                             {locked ? 'locked' : getStatusDisplay(status)}
                           </p>
                         </button>
@@ -263,7 +303,7 @@ return (
             Choose a status for this day. Future days stay locked until their schedule date arrives.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {STATUS_OPTIONS.map((option) => (
+            {STATUS_OPTIONS.filter((option) => option.key !== 'nat').map((option) => (
               <button
                 type="button"
                 key={option.key}

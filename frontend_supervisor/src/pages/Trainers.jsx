@@ -217,6 +217,7 @@ export default function Trainers() {
     cacheManager.clearPattern('trainers_list:')
     cacheManager.clearPattern('trainer_qualifications:')
     cacheManager.clearPattern('stats_')
+    cacheManager.clearPattern('admin_history')
   }
 
   const loadTrainers = useCallback(async () => {
@@ -481,6 +482,18 @@ export default function Trainers() {
 
   const handleDelete = async (trainerId) => {
     if (!globalThis.confirm('Delete this trainer account?')) return
+    const previousTrainers = [...trainers]
+
+    // 1. Immediately trigger transition animation
+    setTrainers((prev) =>
+      prev.map((t) => (t.id === trainerId ? { ...t, isDeleting: true } : t))
+    )
+
+    // 2. Filter out of active list after animation time (300ms)
+    setTimeout(() => {
+      setTrainers((prev) => prev.filter((t) => t.id !== trainerId))
+    }, 300)
+
     try {
       const response = await fetch(`${API_BASE}/api/trainers/${trainerId}`, {
         method: 'DELETE',
@@ -494,6 +507,8 @@ export default function Trainers() {
       invalidateTrainerCaches()
       loadTrainers()
     } catch (error) {
+      // 3. Rollback on failure
+      setTrainers(previousTrainers)
       toast.error(error.message)
     }
   }
@@ -552,7 +567,14 @@ export default function Trainers() {
         <div className="max-h-[36rem] overflow-y-auto pr-1">
           <div className="grid gap-5 xl:grid-cols-2">
           {filteredTrainers.map((trainer) => (
-            <div key={trainer.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div
+              key={trainer.id}
+              className={`rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 transform origin-center ${
+                trainer.isDeleting
+                  ? 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
+                  : 'opacity-100 scale-100 translate-y-0'
+              }`}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
