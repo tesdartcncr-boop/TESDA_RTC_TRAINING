@@ -80,10 +80,13 @@ export const AuthProvider = ({ children }) => {
       }
       setUser(response.data)
     } catch (error) {
-      console.error(error)
-      clearStoredToken()
-      delete axios.defaults.headers.common.Authorization
-      setUser(null)
+      const status = error?.response?.status
+      // Only logout on auth failures (401/403), not transient server errors (503, network)
+      if (status === 401 || status === 403) {
+        clearStoredToken()
+        delete axios.defaults.headers.common.Authorization
+        setUser(null)
+      }
     } finally {
       setLoading(false)
     }

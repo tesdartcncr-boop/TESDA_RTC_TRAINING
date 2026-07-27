@@ -98,7 +98,17 @@ export default function Profile() {
   const handleSave = async (values) => {
     setIsLoading(true)
     try {
-      const result = await updateProfile(values)
+      const payload = {
+        trainer_name: values.trainer_name?.trim() || null,
+        sex: values.sex?.trim() || null,
+        first_name: values.first_name?.trim() || null,
+        middle_name: values.middle_name?.trim() || null,
+        last_name: values.last_name?.trim() || null,
+        extension: values.extension?.trim() || null,
+        trainer_type: values.trainer_type?.trim() || null,
+        ctpr_recognition_number: values.ctpr_recognition_number?.trim() || null,
+      }
+      const result = await updateProfile(payload)
       if (result.success) {
         setIsEditing(false)
       }

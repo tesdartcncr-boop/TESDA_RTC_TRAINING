@@ -340,6 +340,26 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
             }
         }
 
+        trainer_base = {k: v for k, v in trainer.items() if k != "trainer_name"}
+
+        # Check if we should rebuild trainer_name
+        name_parts_keys = {"first_name", "middle_name", "last_name", "extension"}
+        has_name_parts_updates = any(k in trainer_updates for k in name_parts_keys)
+        should_rebuild_name = (
+            has_name_parts_updates and (
+                "trainer_name" not in trainer_updates or 
+                trainer_updates["trainer_name"] is None or 
+                trainer_updates["trainer_name"] == trainer.get("trainer_name")
+            )
+        ) or (
+            "trainer_name" in trainer_updates and trainer_updates["trainer_name"] is None
+        )
+
+        if should_rebuild_name:
+            merged = {**trainer_base, **trainer_updates}
+            payload_for_build = {k: v for k, v in merged.items() if k != "trainer_name"}
+            trainer_updates["trainer_name"] = build_trainer_name(payload_for_build)
+
         if "email" in update_data and user:
             other_email_user = select_one("users", filters={"email": f"eq.{update_data['email']}"}, select="id")
             if other_email_user and int(other_email_user["id"]) != int(user["id"]):
@@ -348,7 +368,7 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
                 "users",
                 {
                     "email": update_data["email"],
-                    "full_name": build_trainer_name({**trainer, **trainer_updates}),
+                    "full_name": trainer_updates.get("trainer_name") or trainer.get("trainer_name"),
                     "sex": update_data.get("sex", user.get("sex") if user else trainer.get("sex")),
                 },
                 filters={"id": f"eq.{trainer['user_id']}"},
@@ -357,7 +377,7 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
             update_row(
                 "users",
                 {
-                    "full_name": build_trainer_name({**trainer, **trainer_updates}),
+                    "full_name": trainer_updates.get("trainer_name") or trainer.get("trainer_name"),
                     "sex": update_data.get("sex", user.get("sex") if user else trainer.get("sex")),
                 },
                 filters={"id": f"eq.{trainer['user_id']}"},
@@ -365,8 +385,6 @@ async def update_trainer(trainer_id: int, trainer_data: TrainerUpdate, current_u
 
         updated_trainer = trainer
         if trainer_updates:
-            if "trainer_name" not in trainer_updates:
-                trainer_updates["trainer_name"] = build_trainer_name({**trainer, **trainer_updates})
             updated_trainer = update_row("trainers", trainer_updates, filters={"id": f"eq.{trainer_id}"}) or trainer
 
         clear_trainer_caches()
@@ -387,19 +405,41 @@ async def update_trainer_profile(trainer_data: TrainerSelfUpdate, current_user: 
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trainer profile not found")
 
         update_data = trainer_data.dict(exclude_unset=True)
-        if update_data and "trainer_name" not in update_data:
-            update_data["trainer_name"] = build_trainer_name({**trainer, **update_data})
+
+        # Check if we should rebuild trainer_name
+        name_parts_keys = {"first_name", "middle_name", "last_name", "extension"}
+        has_name_parts_updates = any(k in update_data for k in name_parts_keys)
+        should_rebuild_name = (
+            has_name_parts_updates and (
+                "trainer_name" not in update_data or 
+                update_data["trainer_name"] is None or 
+                update_data["trainer_name"] == trainer.get("trainer_name")
+            )
+        ) or (
+            "trainer_name" in update_data and update_data["trainer_name"] is None
+        )
+
+        base = {k: v for k, v in trainer.items() if k != "trainer_name"}
+
+        if should_rebuild_name:
+            merged = {**base, **update_data}
+            payload_for_build = {k: v for k, v in merged.items() if k != "trainer_name"}
+            update_data["trainer_name"] = build_trainer_name(payload_for_build)
 
         user_updates = {}
         if "sex" in update_data:
             user_updates["sex"] = update_data.pop("sex")
 
-        updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer['id']}"}) or trainer
-        update_row(
-            "users",
-            {"full_name": build_trainer_name({**trainer, **update_data}), **user_updates},
-            filters={"id": f"eq.{trainer['user_id']}"},
-        )
+        updated_trainer = trainer
+        if update_data:
+            updated_trainer = update_row("trainers", update_data, filters={"id": f"eq.{trainer['id']}"}) or trainer
+
+        # Always sync full_name to users table
+        full_name = update_data.get("trainer_name") or updated_trainer.get("trainer_name")
+        user_payload = {"full_name": full_name, **user_updates}
+        if user_payload:
+            update_row("users", user_payload, filters={"id": f"eq.{trainer['user_id']}"})
+
         clear_trainer_caches()
         await broadcast_trainer_update(updated_trainer)
         return updated_trainer

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart3, Briefcase, ClipboardCheck, PlusCircle, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { cacheManager } from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
@@ -14,19 +13,12 @@ export default function Dashboard() {
 
   const loadStats = useCallback(async () => {
     try {
-      const cacheKey = cacheManager.generateKey('admin_dashboard_stats')
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setStats(cached)
-        return
-      }
-
       const response = await fetch(`${API_BASE}/api/admin/dashboard/stats`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       setStats(data)
-      cacheManager.set(cacheKey, data)
     } catch {
       setStats(null)
     } finally {

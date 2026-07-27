@@ -82,9 +82,13 @@ export const AuthProvider = ({ children }) => {
       const trainerResponse = await axios.get(`${API_BASE}/api/auth/trainer/me`)
       setUser({ ...userResponse.data, ...trainerResponse.data, trainer_id: trainerResponse.data.id })
     } catch (error) {
-      clearStoredToken()
-      delete axios.defaults.headers.common.Authorization
-      setUser(null)
+      const status = error?.response?.status
+      // Only logout on auth failures (401/403), not transient server errors (503, network)
+      if (status === 401 || status === 403) {
+        clearStoredToken()
+        delete axios.defaults.headers.common.Authorization
+        setUser(null)
+      }
     } finally {
       setLoading(false)
     }
@@ -195,8 +199,12 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (profileData) => {
     try {
-      await axios.put(`${API_BASE}/api/trainers/me/profile`, profileData)
-      await fetchUser()
+      const response = await axios.put(`${API_BASE}/api/trainers/me/profile`, profileData)
+      // Immediately merge the returned trainer data into user state
+      const updatedTrainer = response.data
+      setUser((prev) => prev ? { ...prev, ...updatedTrainer, trainer_id: updatedTrainer.id } : prev)
+      // Refresh full user data in the background (non-critical)
+      fetchUser().catch(() => {})
       toast.success('Profile updated successfully')
       return { success: true }
     } catch (error) {

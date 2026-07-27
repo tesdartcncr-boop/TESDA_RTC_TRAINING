@@ -8,7 +8,7 @@ import { getSocket, registerUser } from '../utils/socket'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('management_token') || sessionStorage.getItem('management_session_token')
 const PAGE_SIZE = 15
-const TEACHING_LOADS_CACHE_VERSION = 'v2'
+const TEACHING_LOADS_CACHE_VERSION = 'v3'
 
 const getTrainerDisplayName = (trainer) => (
   trainer?.trainer_name || trainer?.full_name || trainer?.username || trainer?.email || 'Unnamed trainer'
@@ -72,6 +72,7 @@ export default function TeachingLoads() {
       const response = await fetch(`${API_BASE}/api/admin/teaching-loads/summary`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const allLoads = Array.isArray(data) ? data : []
       setAllTeachingLoads(allLoads)
@@ -97,6 +98,7 @@ export default function TeachingLoads() {
       const response = await fetch(`${API_BASE}/api/programs/?skip=${skip}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const nextPrograms = data.data || []
       const totalPages = getTotalPages(data, page)
@@ -124,6 +126,7 @@ export default function TeachingLoads() {
       const response = await fetch(`${API_BASE}/api/trainers/?skip=${skip}&limit=${PAGE_SIZE}&search=${encodeURIComponent(search)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const nextTrainers = data.data || []
       const totalPages = getTotalPages(data, page)
@@ -149,6 +152,7 @@ export default function TeachingLoads() {
       const response = await fetch(`${API_BASE}/api/admin/programs/${programId}/teaching-loads`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const nextLoads = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []
       setTeachingLoads(nextLoads)
@@ -172,6 +176,7 @@ export default function TeachingLoads() {
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const nextLoads = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []
       setTeachingLoads(nextLoads)
@@ -1050,22 +1055,36 @@ function ReadOnlyCalendarView({ teachingLoad }) {
   const generateCalendarWeeks = () => {
     if (scheduleDays.length === 0) return []
 
-    // Sort entries by schedule_date
-    const sortedEntries = [...scheduleDays].sort((a, b) => {
-      const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
-      const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
-      return dateA - dateB
-    })
+    // Filter out entries without a schedule_date and sort them
+    const validEntries = [...scheduleDays]
+      .filter((entry) => !!entry.schedule_date)
+      .sort((a, b) => {
+        const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
+        const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
+        return dateA - dateB
+      })
 
-    const firstDatePart = String(sortedEntries[0].schedule_date).split('T')[0]
-    const firstDate = new Date(`${firstDatePart}T00:00:00`)
+    if (validEntries.length === 0) return []
+
+    const formatDateLocal = (d) => {
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    const parseDateLocal = (dateStr) => {
+      const parts = String(dateStr).split('T')[0].split('-').map(Number)
+      return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+
+    const firstDate = parseDateLocal(validEntries[0].schedule_date)
     const dayOfWeek = firstDate.getDay() // 0 = Sun, 1 = Mon, ...
     const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
     const startOfWeek = new Date(firstDate)
     startOfWeek.setDate(firstDate.getDate() - daysToMonday)
 
-    const lastDatePart = String(sortedEntries[sortedEntries.length - 1].schedule_date).split('T')[0]
-    const lastDate = new Date(`${lastDatePart}T00:00:00`)
+    const lastDate = parseDateLocal(validEntries[validEntries.length - 1].schedule_date)
     const lastDayOfWeek = lastDate.getDay()
     const daysToSunday = lastDayOfWeek === 0 ? 0 : 7 - lastDayOfWeek
     const endOfWeek = new Date(lastDate)
@@ -1085,7 +1104,7 @@ function ReadOnlyCalendarView({ teachingLoad }) {
     while (current <= endOfWeek) {
       const week = []
       for (let i = 0; i < 7; i++) {
-        const dateStr = current.toISOString().split('T')[0]
+        const dateStr = formatDateLocal(current)
         const entry = dateToEntryMap[dateStr]
 
         week.push({
@@ -1232,13 +1251,16 @@ function ReadOnlyCalendarView({ teachingLoad }) {
       </div>
 
       {/* Status Legend */}
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <h4 className="text-sm font-bold text-slate-900 mb-3">Status Legend</h4>
-        <div className="grid gap-2 md:grid-cols-5">
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="h-4 w-1 rounded-full bg-cyan-500" />
+          <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500">Status Legend</h4>
+        </div>
+        <div className="flex flex-wrap gap-2">
           {STATUS_OPTIONS.map((option) => (
-            <div key={option.key} className="flex items-center gap-2">
-              <span className={`h-3 w-3 rounded-full ${option.color}`} />
-              <span className="text-xs font-semibold text-slate-700">{option.label}</span>
+            <div key={option.key} className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 shadow-sm">
+              <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${option.color}`} />
+              <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">{option.label}</span>
             </div>
           ))}
         </div>

@@ -38,23 +38,27 @@ export default function TrainerScheduleView({ program, trainerId }) {
   const progressLabel = program.progress_status === 'completed' ? 'Completed' : 'In Progress'
   const progressTone = program.progress_status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
 
-  const loadSchedule = async () => {
+  const loadSchedule = async (forceRefresh = false) => {
     setLoading(true)
     try {
       const cacheKey = cacheManager.generateKey('trainer_schedule_days', {
         trainer_id: trainerId,
         program_id: program.program_id,
       })
-      const cached = cacheManager.get(cacheKey)
-      if (cached !== null) {
-        setScheduleDays(cached)
-        setLoading(false)
-        return
+      
+      if (!forceRefresh) {
+        const cached = cacheManager.get(cacheKey)
+        if (cached !== null) {
+          setScheduleDays(cached)
+          setLoading(false)
+          return
+        }
       }
 
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/program/${program.program_id}/schedule`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const nextDays = Array.isArray(data) ? data : []
       setScheduleDays(nextDays)
@@ -67,9 +71,17 @@ export default function TrainerScheduleView({ program, trainerId }) {
     }
   }
 
+  const prevProgramRef = React.useRef(null)
+
   useEffect(() => {
-    loadSchedule()
-  }, [program.program_id, trainerId])
+    // If the program object identity changed (parent re-fetched after websocket update),
+    // force a fresh load bypassing cache
+    const isNewProgram = prevProgramRef.current !== null && prevProgramRef.current !== program
+    prevProgramRef.current = program
+    
+    cacheManager.clearPattern('trainer_schedule_days:')
+    loadSchedule(isNewProgram)
+  }, [program, trainerId])
 
   const dayMap = useMemo(() => Object.fromEntries(scheduleDays.map((day) => [day.day_number, day])), [scheduleDays])
 
@@ -105,7 +117,7 @@ export default function TrainerScheduleView({ program, trainerId }) {
       cacheManager.clearPattern('trainer_schedule_days:')
       cacheManager.clearPattern('trainer_teaching_loads:')
       setSelectedDay(null)
-      loadSchedule()
+      loadSchedule(true)
     } catch (error) {
       toast.error(error.message)
     }
@@ -114,22 +126,36 @@ export default function TrainerScheduleView({ program, trainerId }) {
   const generateCalendarWeeks = () => {
     if (scheduleDays.length === 0) return []
 
-    // Sort entries by schedule_date
-    const sortedEntries = [...scheduleDays].sort((a, b) => {
-      const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
-      const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
-      return dateA - dateB
-    })
+    // Filter out entries without a schedule_date and sort them
+    const validEntries = [...scheduleDays]
+      .filter((entry) => !!entry.schedule_date)
+      .sort((a, b) => {
+        const dateA = new Date(`${String(a.schedule_date).split('T')[0]}T00:00:00`).getTime()
+        const dateB = new Date(`${String(b.schedule_date).split('T')[0]}T00:00:00`).getTime()
+        return dateA - dateB
+      })
 
-    const firstDatePart = String(sortedEntries[0].schedule_date).split('T')[0]
-    const firstDate = new Date(`${firstDatePart}T00:00:00`)
+    if (validEntries.length === 0) return []
+
+    const formatDateLocal = (d) => {
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    const parseDateLocal = (dateStr) => {
+      const parts = String(dateStr).split('T')[0].split('-').map(Number)
+      return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+
+    const firstDate = parseDateLocal(validEntries[0].schedule_date)
     const dayOfWeek = firstDate.getDay() // 0 = Sun, 1 = Mon, ...
     const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
     const startOfWeek = new Date(firstDate)
     startOfWeek.setDate(firstDate.getDate() - daysToMonday)
 
-    const lastDatePart = String(sortedEntries[sortedEntries.length - 1].schedule_date).split('T')[0]
-    const lastDate = new Date(`${lastDatePart}T00:00:00`)
+    const lastDate = parseDateLocal(validEntries[validEntries.length - 1].schedule_date)
     const lastDayOfWeek = lastDate.getDay()
     const daysToSunday = lastDayOfWeek === 0 ? 0 : 7 - lastDayOfWeek
     const endOfWeek = new Date(lastDate)
@@ -149,7 +175,7 @@ export default function TrainerScheduleView({ program, trainerId }) {
     while (current <= endOfWeek) {
       const week = []
       for (let i = 0; i < 7; i++) {
-        const dateStr = current.toISOString().split('T')[0]
+        const dateStr = formatDateLocal(current)
         const entry = dateToEntryMap[dateStr]
 
         week.push({
@@ -249,6 +275,7 @@ export default function TrainerScheduleView({ program, trainerId }) {
                       const status = entry?.status
                       const color = getStatusOption(status)?.color || 'bg-slate-300'
                       const locked = isFutureDay(entry?.schedule_date)
+                      const isCustom = entry?.is_custom === true
                       
                       return (
                         <button
@@ -256,15 +283,24 @@ export default function TrainerScheduleView({ program, trainerId }) {
                           key={cell.dateStr}
                           onClick={() => !locked && setSelectedDay(entry.day_number)}
                           disabled={locked}
-                          className={`aspect-square rounded-lg border border-slate-200 p-2 text-center transition-all flex flex-col justify-between ${
+                          className={`aspect-square rounded-lg border p-2 text-center transition-all flex flex-col justify-between ${
                             locked 
-                              ? 'cursor-not-allowed bg-slate-50 opacity-60' 
-                              : 'bg-white hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm'
+                              ? 'cursor-not-allowed bg-slate-50 opacity-60 border-slate-200' 
+                              : isCustom
+                                ? 'bg-white border-cyan-300 shadow-sm hover:bg-cyan-50 hover:border-cyan-400'
+                                : 'bg-white border-slate-200 hover:border-cyan-300 hover:bg-cyan-50 hover:shadow-sm'
                           }`}
                         >
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
-                            <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                          <div className="flex justify-between items-start text-left">
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-700">Day {entry.day_number}</p>
+                              <p className="text-[9px] text-slate-500 font-medium">{formattedDate}</p>
+                            </div>
+                            {isCustom && (
+                              <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-cyan-700 leading-none">
+                                Remedial
+                              </span>
+                            )}
                           </div>
                           <div className="flex justify-center my-1">
                             <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white ${color}`}>
@@ -286,12 +322,18 @@ export default function TrainerScheduleView({ program, trainerId }) {
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-900">Status Legend</h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-4 w-1 rounded-full bg-cyan-500" />
+          <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">Status Legend</h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
           {STATUS_OPTIONS.map((option) => (
-            <div key={option.key} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <span className={`h-4 w-4 rounded-full ${option.color}`} />
-              <span className="text-sm font-semibold text-slate-700">{option.label}</span>
+            <div
+              key={option.key}
+              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-sm"
+            >
+              <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${option.color} shadow-sm`} />
+              <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">{option.label}</span>
             </div>
           ))}
         </div>

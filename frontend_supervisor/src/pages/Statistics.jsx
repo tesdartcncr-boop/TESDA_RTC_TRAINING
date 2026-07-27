@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react'
 import PropTypes from 'prop-types'
 import { BarChart3, CheckCircle2, Clock3, Users, Calendar, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { cacheManager } from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 const getToken = () => localStorage.getItem('supervisor_token') || sessionStorage.getItem('supervisor_session_token')
@@ -38,23 +37,14 @@ export default function Statistics() {
   const loadTeachingLoadsByYear = async (year = null) => {
     setLoadingYearStats(true)
     try {
-      const cacheKey = cacheManager.generateKey('stats_teaching_loads_by_year', { year: year || null })
-      const cached = cacheManager.get(cacheKey)
-      
-      if (cached !== null) {
-        setTeachingLoadsByYear(cached)
-        setLoadingYearStats(false)
-        return
-      }
-
       const url = year ? `${API_BASE}/api/admin/statistics/teaching-loads-by-year?year=${year}` : `${API_BASE}/api/admin/statistics/teaching-loads-by-year`
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       setTeachingLoadsByYear(data)
-      cacheManager.set(cacheKey, data)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load teaching load statistics')
@@ -66,21 +56,6 @@ export default function Statistics() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const dashboardCacheKey = cacheManager.generateKey('stats_dashboard')
-        const overviewCacheKey = cacheManager.generateKey('stats_overview')
-        const cachedDashboard = cacheManager.get(dashboardCacheKey)
-        const cachedOverview = cacheManager.get(overviewCacheKey)
-
-        if (cachedDashboard !== null) {
-          setDashboardStats(cachedDashboard)
-        }
-        if (cachedOverview !== null) {
-          setOverviewStats(cachedOverview)
-        }
-        if (cachedDashboard !== null && cachedOverview !== null) {
-          return
-        }
-
         const [dashboardResponse, overviewResponse] = await Promise.all([
           fetch(`${API_BASE}/api/admin/dashboard/stats`, {
             headers: { Authorization: `Bearer ${getToken()}` },
@@ -90,13 +65,14 @@ export default function Statistics() {
           }),
         ])
 
+        if (!dashboardResponse.ok) throw new Error(`Dashboard stats error: ${dashboardResponse.status}`)
+        if (!overviewResponse.ok) throw new Error(`Overview stats error: ${overviewResponse.status}`)
+
         const dashboardData = await dashboardResponse.json()
         const overviewData = await overviewResponse.json()
 
         setDashboardStats(dashboardData)
         setOverviewStats(overviewData)
-        cacheManager.set(dashboardCacheKey, dashboardData)
-        cacheManager.set(overviewCacheKey, overviewData)
       } catch (error) {
         console.error(error)
         toast.error('Failed to load statistics')

@@ -482,51 +482,37 @@ export default function Trainers() {
   const handleUpdate = async (values) => {
     setIsProcessing(true)
     try {
-      const payload = Object.entries({
-        email: values.email,
-        trainer_name: values.trainer_name,
-        sex: values.sex,
-        first_name: values.first_name,
-        middle_name: values.middle_name,
-        last_name: values.last_name,
-        extension: values.extension,
-        trainer_type: values.trainer_type,
-        tm_number: values.tm_number,
-        tm_expiration: values.tm_expiration,
-        nttc_number: values.nttc_number,
-        nttc_expiration: values.nttc_expiration,
-        ctpr_recognition_number: values.ctpr_recognition_number,
-      }).reduce((acc, [key, value]) => {
-        if (value === undefined || value === null) {
-          return acc
-        }
-        if (typeof value === 'string') {
-          const trimmed = value.trim()
-          if (!trimmed) {
-            return acc
-          }
-          acc[key] = trimmed
-          return acc
-        }
-        acc[key] = value
-        return acc
-      }, {})
-
-      const hasTrainerUpdates = Object.keys(payload).length > 0
-      if (hasTrainerUpdates) {
-        const response = await fetch(`${API_BASE}/api/trainers/${editingTrainer.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${getToken()}`,
-          },
-          body: JSON.stringify(payload),
-        })
-        const responseData = await response.json()
-        if (!response.ok) {
-          throw new Error(getErrorMessage(responseData, 'Failed to update trainer'))
-        }
+      const payload = {
+        email: values.email?.trim() || null,
+        trainer_name: values.trainer_name?.trim() || null,
+        sex: values.sex?.trim() || null,
+        first_name: values.first_name?.trim() || null,
+        middle_name: values.middle_name?.trim() || null,
+        last_name: values.last_name?.trim() || null,
+        extension: values.extension?.trim() || null,
+        trainer_type: values.trainer_type?.trim() || null,
+        tm_number: values.tm_number?.trim() || null,
+        tm_expiration: values.tm_expiration || null,
+        nttc_number: values.nttc_number?.trim() || null,
+        nttc_expiration: values.nttc_expiration || null,
+        ctpr_recognition_number: values.ctpr_recognition_number?.trim() || null,
       }
+
+      const response = await fetch(`${API_BASE}/api/trainers/${editingTrainer.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(payload),
+      })
+      const responseData = await response.json()
+      if (!response.ok) {
+        throw new Error(getErrorMessage(responseData, 'Failed to update trainer'))
+      }
+
+      // Immediately reflect the updated trainer in the list
+      setTrainers((prev) => prev.map((t) => (t.id === editingTrainer.id ? { ...t, ...responseData } : t)))
 
       const originalQualifications = originalEditQualificationsRef.current
       if (qualificationSignature(editQualifications) !== qualificationSignature(originalQualifications)) {

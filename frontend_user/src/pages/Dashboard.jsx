@@ -45,10 +45,18 @@ export default function Dashboard() {
       const response = await fetch(`${API_BASE}/api/schedules/trainer/${trainerId}/programs`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       const loads = Array.isArray(data) ? data : []
       setTeachingLoads(loads)
-      setSelectedLoad(loads[0] || null)
+      // Preserve current selection if it still exists in the updated list
+      setSelectedLoad((prev) => {
+        if (prev) {
+          const match = loads.find((l) => l.id === prev.id)
+          if (match) return match
+        }
+        return loads[0] || null
+      })
       cacheManager.set(cacheKey, loads)
     } catch (error) {
       console.error(error)
